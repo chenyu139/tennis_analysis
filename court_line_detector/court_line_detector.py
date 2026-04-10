@@ -3,12 +3,14 @@ import torchvision.transforms as transforms
 import cv2
 from torchvision import models
 import numpy as np
+import os
 
 class CourtLineDetector:
     def __init__(self, model_path):
-        self.model = models.resnet50(pretrained=True)
+        self.model = models.resnet50(weights=None)
         self.model.fc = torch.nn.Linear(self.model.fc.in_features, 14*2) 
-        self.model.load_state_dict(torch.load(model_path, map_location='cpu'))
+        if os.path.exists(model_path):
+            self.model.load_state_dict(torch.load(model_path, map_location='cpu'))
         self.transform = transforms.Compose([
             transforms.ToPILImage(),
             transforms.Resize((224, 224)),

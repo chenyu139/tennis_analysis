@@ -7,14 +7,23 @@ from utils import measure_distance, get_center_of_bbox
 
 class PlayerTracker:
     def __init__(self,model_path):
-        self.model = YOLO(model_path)
+        self.model_path = model_path
+        self.model = None
 
     def choose_and_filter_players(self, court_keypoints, player_detections):
         player_detections_first_frame = player_detections[0]
         chosen_player = self.choose_players(court_keypoints, player_detections_first_frame)
+        player_id_map = {
+            chosen_player[0]: 1,
+            chosen_player[1]: 2
+        }
         filtered_player_detections = []
         for player_dict in player_detections:
-            filtered_player_dict = {track_id: bbox for track_id, bbox in player_dict.items() if track_id in chosen_player}
+            filtered_player_dict = {
+                player_id_map[track_id]: bbox
+                for track_id, bbox in player_dict.items()
+                if track_id in player_id_map
+            }
             filtered_player_detections.append(filtered_player_dict)
         return filtered_player_detections
 
@@ -45,6 +54,9 @@ class PlayerTracker:
             with open(stub_path, 'rb') as f:
                 player_detections = pickle.load(f)
             return player_detections
+
+        if self.model is None:
+            self.model = YOLO(self.model_path)
 
         for frame in frames:
             player_dict = self.detect_frame(frame)

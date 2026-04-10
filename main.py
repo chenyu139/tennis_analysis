@@ -10,6 +10,7 @@ from court_line_detector import CourtLineDetector
 from mini_court import MiniCourt
 import cv2
 import pandas as pd
+import numpy as np
 from copy import deepcopy
 
 
@@ -59,18 +60,28 @@ def main():
         'player_1_last_shot_speed':0,
         'player_1_total_player_speed':0,
         'player_1_last_player_speed':0,
+        'player_1_total_distance_run':0,
+        'player_1_last_distance_run':0,
+        'player_1_total_calories_burned':0,
+        'player_1_last_calories_burned':0,
 
         'player_2_number_of_shots':0,
         'player_2_total_shot_speed':0,
         'player_2_last_shot_speed':0,
         'player_2_total_player_speed':0,
         'player_2_last_player_speed':0,
+        'player_2_total_distance_run':0,
+        'player_2_last_distance_run':0,
+        'player_2_total_calories_burned':0,
+        'player_2_last_calories_burned':0,
     } ]
     
     for ball_shot_ind in range(len(ball_shot_frames)-1):
         start_frame = ball_shot_frames[ball_shot_ind]
         end_frame = ball_shot_frames[ball_shot_ind+1]
         ball_shot_time_in_seconds = (end_frame-start_frame)/24 # 24fps
+        if ball_shot_time_in_seconds <= 0:
+            continue
 
         # Get distance covered by the ball
         distance_covered_by_ball_pixels = measure_distance(ball_mini_court_detections[start_frame][1],
@@ -108,6 +119,30 @@ def main():
         current_player_stats[f'player_{opponent_player_id}_total_player_speed'] += speed_of_opponent
         current_player_stats[f'player_{opponent_player_id}_last_player_speed'] = speed_of_opponent
 
+        player_1_distance_covered_pixels = measure_distance(player_mini_court_detections[start_frame][1],
+                                                            player_mini_court_detections[end_frame][1])
+        player_2_distance_covered_pixels = measure_distance(player_mini_court_detections[start_frame][2],
+                                                            player_mini_court_detections[end_frame][2])
+        player_1_distance_covered_meters = convert_pixel_distance_to_meters(player_1_distance_covered_pixels,
+                                                                            constants.DOUBLE_LINE_WIDTH,
+                                                                            mini_court.get_width_of_mini_court())
+        player_2_distance_covered_meters = convert_pixel_distance_to_meters(player_2_distance_covered_pixels,
+                                                                            constants.DOUBLE_LINE_WIDTH,
+                                                                            mini_court.get_width_of_mini_court())
+
+        player_1_calories_burned = (player_1_distance_covered_meters / 1000) * constants.PLAYER_1_WEIGHT_KG * constants.CALORIES_PER_KM_PER_KG
+        player_2_calories_burned = (player_2_distance_covered_meters / 1000) * constants.PLAYER_2_WEIGHT_KG * constants.CALORIES_PER_KM_PER_KG
+
+        current_player_stats['player_1_total_distance_run'] += player_1_distance_covered_meters
+        current_player_stats['player_1_last_distance_run'] = player_1_distance_covered_meters
+        current_player_stats['player_1_total_calories_burned'] += player_1_calories_burned
+        current_player_stats['player_1_last_calories_burned'] = player_1_calories_burned
+
+        current_player_stats['player_2_total_distance_run'] += player_2_distance_covered_meters
+        current_player_stats['player_2_last_distance_run'] = player_2_distance_covered_meters
+        current_player_stats['player_2_total_calories_burned'] += player_2_calories_burned
+        current_player_stats['player_2_last_calories_burned'] = player_2_calories_burned
+
         player_stats_data.append(current_player_stats)
 
     player_stats_data_df = pd.DataFrame(player_stats_data)
@@ -115,10 +150,13 @@ def main():
     player_stats_data_df = pd.merge(frames_df, player_stats_data_df, on='frame_num', how='left')
     player_stats_data_df = player_stats_data_df.ffill()
 
-    player_stats_data_df['player_1_average_shot_speed'] = player_stats_data_df['player_1_total_shot_speed']/player_stats_data_df['player_1_number_of_shots']
-    player_stats_data_df['player_2_average_shot_speed'] = player_stats_data_df['player_2_total_shot_speed']/player_stats_data_df['player_2_number_of_shots']
-    player_stats_data_df['player_1_average_player_speed'] = player_stats_data_df['player_1_total_player_speed']/player_stats_data_df['player_2_number_of_shots']
-    player_stats_data_df['player_2_average_player_speed'] = player_stats_data_df['player_2_total_player_speed']/player_stats_data_df['player_1_number_of_shots']
+    player_1_shots = player_stats_data_df['player_1_number_of_shots'].replace(0, np.nan)
+    player_2_shots = player_stats_data_df['player_2_number_of_shots'].replace(0, np.nan)
+
+    player_stats_data_df['player_1_average_shot_speed'] = (player_stats_data_df['player_1_total_shot_speed']/player_1_shots).fillna(0)
+    player_stats_data_df['player_2_average_shot_speed'] = (player_stats_data_df['player_2_total_shot_speed']/player_2_shots).fillna(0)
+    player_stats_data_df['player_1_average_player_speed'] = (player_stats_data_df['player_1_total_player_speed']/player_2_shots).fillna(0)
+    player_stats_data_df['player_2_average_player_speed'] = (player_stats_data_df['player_2_total_player_speed']/player_1_shots).fillna(0)
 
 
 

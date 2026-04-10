@@ -5,7 +5,8 @@ import pandas as pd
 
 class BallTracker:
     def __init__(self,model_path):
-        self.model = YOLO(model_path)
+        self.model_path = model_path
+        self.model = None
 
     def interpolate_ball_positions(self, ball_positions):
         ball_positions = [x.get(1,[]) for x in ball_positions]
@@ -22,7 +23,6 @@ class BallTracker:
 
     def get_ball_shot_frames(self,ball_positions):
         ball_positions = [x.get(1,[]) for x in ball_positions]
-        # convert the list into pandas dataframe
         df_ball_positions = pd.DataFrame(ball_positions,columns=['x1','y1','x2','y2'])
 
         df_ball_positions['ball_hit'] = 0
@@ -47,9 +47,20 @@ class BallTracker:
                         change_count+=1
             
                 if change_count>minimum_change_frames_for_hit-1:
-                    df_ball_positions['ball_hit'].iloc[i] = 1
+                    df_ball_positions.loc[i, 'ball_hit'] = 1
 
         frame_nums_with_ball_hits = df_ball_positions[df_ball_positions['ball_hit']==1].index.tolist()
+
+        if len(frame_nums_with_ball_hits) == 0:
+            sign = (df_ball_positions['delta_y'] > 0).astype(int)
+            sign_change = sign.diff().fillna(0).abs()
+            candidate_frames = df_ball_positions[sign_change > 0].index.tolist()
+            filtered_frames = []
+            min_gap = 12
+            for frame_idx in candidate_frames:
+                if not filtered_frames or frame_idx - filtered_frames[-1] >= min_gap:
+                    filtered_frames.append(frame_idx)
+            frame_nums_with_ball_hits = filtered_frames
 
         return frame_nums_with_ball_hits
 
@@ -60,6 +71,9 @@ class BallTracker:
             with open(stub_path, 'rb') as f:
                 ball_detections = pickle.load(f)
             return ball_detections
+
+        if self.model is None:
+            self.model = YOLO(self.model_path)
 
         for frame in frames:
             player_dict = self.detect_frame(frame)
