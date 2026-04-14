@@ -18,22 +18,25 @@ def parse_args() -> argparse.Namespace:
 
     player_parser = subparsers.add_parser("player")
     add_detection_args(player_parser)
+    player_parser.set_defaults(output_name="player_detector")
 
     ball_parser = subparsers.add_parser("ball")
     add_detection_args(ball_parser)
+    ball_parser.set_defaults(output_name="ball_detector")
 
     court_parser = subparsers.add_parser("court")
     court_parser.add_argument("--weights", required=True)
     court_parser.add_argument("--output-dir", default="mobile_artifacts/court")
-    court_parser.add_argument("--output-name", default="court_keypoints.onnx")
+    court_parser.add_argument("--output-name", default="court_keypoints")
+    court_parser.add_argument("--format", choices=["onnx", "coreml"], default="coreml")
     court_parser.add_argument("--opset", type=int, default=13)
     court_parser.add_argument("--input-width", type=int, default=224)
     court_parser.add_argument("--input-height", type=int, default=224)
     court_parser.add_argument(
         "--mobile-target",
-        choices=["cpu", "gpu", "nnapi"],
-        default="cpu",
-        help="Target runtime for the exported mobile asset. Current court export only supports CPU/GPU-friendly ONNX.",
+        choices=["cpu", "gpu", "nnapi", "ane"],
+        default="ane",
+        help="Target runtime for the exported mobile asset.",
     )
 
     return parser.parse_args()
@@ -42,6 +45,7 @@ def parse_args() -> argparse.Namespace:
 def add_detection_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--weights", required=True)
     parser.add_argument("--output-dir", default="mobile_artifacts")
+    parser.add_argument("--output-name")
     parser.add_argument(
         "--saved-model-dir",
         help="Reuse an existing SavedModel export instead of invoking Ultralytics export again.",
@@ -51,7 +55,7 @@ def add_detection_args(parser: argparse.ArgumentParser) -> None:
         help="Representative dataset .npy file to use for INT8 calibration.",
     )
     parser.add_argument("--imgsz", type=int, default=640)
-    parser.add_argument("--format", choices=["onnx", "tflite"], default="tflite")
+    parser.add_argument("--format", choices=["onnx", "tflite", "coreml"], default="tflite")
     parser.add_argument("--half", action="store_true")
     parser.add_argument("--int8", action="store_true")
     parser.add_argument("--data")
@@ -65,9 +69,9 @@ def add_detection_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--mobile-target",
-        choices=["cpu", "gpu", "nnapi"],
+        choices=["cpu", "gpu", "nnapi", "ane"],
         default="cpu",
-        help="Export profile for the mobile runtime. NNAPI/NPU requires TFLite INT8 plus representative data.",
+        help="Export profile for the mobile runtime. NNAPI requires TFLite INT8 while ANE targets Core ML.",
     )
 
 
@@ -79,14 +83,49 @@ def write_metadata(path: Path, metadata: dict) -> None:
 def preferred_delegate_for_mobile_target(mobile_target: str) -> str:
     if mobile_target == "nnapi":
         return "NNAPI"
+    if mobile_target == "ane":
+        return "ANE"
     if mobile_target == "gpu":
         return "GPU"
     return "CPU"
 
 
+def ensure_coremltools():
+    try:
+        import coremltools as ct
+    except ImportError as exc:
+        raise RuntimeError(
+            "coremltools is required for Core ML export. Install it on macOS before running --format coreml."
+        ) from exc
+    return ct
+
+
+def coreml_compute_unit_for_mobile_target(ct, mobile_target: str):
+    if mobile_target == "ane":
+        return ct.ComputeUnit.ALL
+    if mobile_target == "gpu":
+        return ct.ComputeUnit.CPU_AND_GPU
+    return ct.ComputeUnit.CPU_ONLY
+
+
 def copy_exported_model(exported: Path, output_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     destination = output_dir / exported.name
+    if exported.resolve() != destination.resolve():
+        shutil.copy2(exported, destination)
+    return destination
+
+
+def normalize_exported_model_path(exported: Path, output_dir: Path, output_name: str) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    suffix = "".join(exported.suffixes)
+    destination = output_dir / f"{output_name}{suffix}"
+    if exported.is_dir():
+        if exported.resolve() != destination.resolve():
+            if destination.exists():
+                shutil.rmtree(destination)
+            shutil.copytree(exported, destination)
+        return destination
     if exported.resolve() != destination.resolve():
         shutil.copy2(exported, destination)
     return destination
@@ -204,10 +243,12 @@ def export_detection_model(args: argparse.Namespace, name: str) -> None:
             raise ValueError("NNAPI/NPU export requires --int8")
         if not args.data:
             raise ValueError("NNAPI/NPU export requires --data for representative calibration")
+    if args.mobile_target == "ane" and args.format != "coreml":
+        raise ValueError("ANE export requires --format coreml")
 
-    is_tflite = args.format == "tflite"
     output_dir = Path(args.output_dir) / name
     weights_path = Path(args.weights)
+    output_name = args.output_name or f"{name}_detector"
     export_kwargs = {
         "format": args.format,
         "imgsz": args.imgsz,
@@ -247,28 +288,31 @@ def export_detection_model(args: argparse.Namespace, name: str) -> None:
                     "SavedModel is too large for stable INT8 conversion inside WSL "
                     f"({saved_model_size_mb:.1f} MB), and no reusable INT8 TFLite artifact was found."
                 )
-            exported_path = copy_exported_model(existing_int8, output_dir)
+            exported_path = normalize_exported_model_path(existing_int8, output_dir, output_name)
         else:
+            raw_output_path = output_dir / f"{weights_path.stem}_int8.tflite"
             quantize_saved_model_to_int8(
                 saved_model_dir=saved_model_dir,
-                output_path=exported_path,
+                output_path=raw_output_path,
                 calibration_path=calibration_path,
                 sample_count=args.calibration_samples,
             )
+            exported_path = normalize_exported_model_path(raw_output_path, output_dir, output_name)
     else:
         model = YOLO(args.weights)
         exported = model.export(**export_kwargs)
-        exported_path = copy_exported_model(Path(str(exported)), output_dir)
+        exported_raw = Path(str(exported))
+        exported_path = normalize_exported_model_path(exported_raw, output_dir, output_name)
 
     write_metadata(
-        exported_path.with_suffix(".json"),
+        output_dir / f"{output_name}.json",
         {
             "name": name,
             "source_weights": str(Path(args.weights).resolve()),
             "exported_model": str(exported_path.resolve()),
             "format": args.format,
-            "input_shape": [1, args.imgsz, args.imgsz, 3] if is_tflite else [1, 3, args.imgsz, args.imgsz],
-            "input_layout": "NHWC" if is_tflite else "NCHW",
+            "input_shape": [1, args.imgsz, args.imgsz, 3] if args.format in {"tflite", "coreml"} else [1, 3, args.imgsz, args.imgsz],
+            "input_layout": "NHWC" if args.format in {"tflite", "coreml"} else "NCHW",
             "input_range": [0.0, 1.0],
             "half": args.half,
             "int8": args.int8,
@@ -292,30 +336,51 @@ def export_court_model(args: argparse.Namespace) -> None:
     model.eval()
 
     dummy_input = torch.randn(1, 3, args.input_height, args.input_width)
-    output_path = output_dir / args.output_name
 
-    torch.onnx.export(
-        model,
-        dummy_input,
-        str(output_path),
-        input_names=["input"],
-        output_names=["keypoints"],
-        opset_version=args.opset,
-        do_constant_folding=True,
-    )
+    if args.format == "onnx":
+        output_path = output_dir / f"{args.output_name}.onnx"
+        torch.onnx.export(
+            model,
+            dummy_input,
+            str(output_path),
+            input_names=["input"],
+            output_names=["keypoints"],
+            opset_version=args.opset,
+            do_constant_folding=True,
+        )
+    else:
+        ct = ensure_coremltools()
+        traced = torch.jit.trace(model, dummy_input)
+        output_path = output_dir / f"{args.output_name}.mlpackage"
+        mlmodel = ct.convert(
+            traced,
+            convert_to="mlprogram",
+            inputs=[
+                ct.TensorType(
+                    name="input",
+                    shape=dummy_input.shape,
+                    dtype=np.float32,
+                )
+            ],
+            outputs=[ct.TensorType(name="keypoints")],
+            compute_units=coreml_compute_unit_for_mobile_target(ct, args.mobile_target),
+        )
+        mlmodel.save(str(output_path))
 
     write_metadata(
-        output_path.with_suffix(".json"),
+        output_dir / f"{args.output_name}.json",
         {
             "name": "court",
             "source_weights": str(Path(args.weights).resolve()),
             "exported_model": str(output_path.resolve()),
-            "format": "onnx",
+            "format": args.format,
             "input_shape": [1, 3, args.input_height, args.input_width],
             "input_layout": "NCHW",
             "normalize_mean": [0.485, 0.456, 0.406],
             "normalize_std": [0.229, 0.224, 0.225],
             "output_shape": [1, 28],
+            "mobile_target": args.mobile_target,
+            "preferred_delegate": preferred_delegate_for_mobile_target(args.mobile_target),
         },
     )
 
