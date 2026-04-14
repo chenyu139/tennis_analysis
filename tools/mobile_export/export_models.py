@@ -42,6 +42,14 @@ def parse_args() -> argparse.Namespace:
 def add_detection_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--weights", required=True)
     parser.add_argument("--output-dir", default="mobile_artifacts")
+    parser.add_argument(
+        "--saved-model-dir",
+        help="Reuse an existing SavedModel export instead of invoking Ultralytics export again.",
+    )
+    parser.add_argument(
+        "--calibration-data",
+        help="Representative dataset .npy file to use for INT8 calibration.",
+    )
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--format", choices=["onnx", "tflite"], default="tflite")
     parser.add_argument("--half", action="store_true")
@@ -120,6 +128,38 @@ def representative_dataset_from_npy(calibration_path: Path, sample_count: int):
     return generator
 
 
+def infer_saved_model_dir(weights: Path) -> Path | None:
+    candidate = weights.with_name(f"{weights.stem}_saved_model")
+    return candidate if candidate.exists() else None
+
+
+def infer_calibration_path(saved_model_dir: Path | None) -> Path | None:
+    if saved_model_dir is None:
+        return None
+    candidate = saved_model_dir / "tmp_tflite_int8_calibration_images.npy"
+    return candidate if candidate.exists() else None
+
+
+def find_existing_int8_tflite(search_dirs: list[Path], stem: str) -> Path | None:
+    exact_names = [
+        f"{stem}_int8.tflite",
+        f"{stem}_int8_probe.tflite",
+        f"{stem}_int8_probe2.tflite",
+        f"{stem}_int8_probe_old.tflite",
+    ]
+    for directory in search_dirs:
+        if not directory.exists():
+            continue
+        for name in exact_names:
+            candidate = directory / name
+            if candidate.exists():
+                return candidate
+        candidates = sorted(directory.glob(f"{stem}_int8*.tflite"))
+        if candidates:
+            return candidates[0]
+    return None
+
+
 def quantize_saved_model_to_int8(
     saved_model_dir: Path,
     output_path: Path,
@@ -165,8 +205,9 @@ def export_detection_model(args: argparse.Namespace, name: str) -> None:
         if not args.data:
             raise ValueError("NNAPI/NPU export requires --data for representative calibration")
 
-    model = YOLO(args.weights)
     is_tflite = args.format == "tflite"
+    output_dir = Path(args.output_dir) / name
+    weights_path = Path(args.weights)
     export_kwargs = {
         "format": args.format,
         "imgsz": args.imgsz,
@@ -179,24 +220,45 @@ def export_detection_model(args: argparse.Namespace, name: str) -> None:
         export_kwargs["data"] = args.data
 
     if args.mobile_target == "nnapi" and args.int8 and args.format == "tflite":
-        saved_model_export_kwargs = {
-            **export_kwargs,
-            "format": "saved_model",
-            "half": False,
-            "int8": False,
-        }
-        exported_saved_model = Path(str(model.export(**saved_model_export_kwargs)))
-        calibration_path = exported_saved_model / "tmp_tflite_int8_calibration_images.npy"
-        exported_path = Path(args.output_dir) / name / f"{Path(args.weights).stem}_int8.tflite"
-        quantize_saved_model_to_int8(
-            saved_model_dir=exported_saved_model,
-            output_path=exported_path,
-            calibration_path=calibration_path,
-            sample_count=args.calibration_samples,
-        )
+        saved_model_dir = Path(args.saved_model_dir) if args.saved_model_dir else infer_saved_model_dir(weights_path)
+        calibration_path = Path(args.calibration_data) if args.calibration_data else infer_calibration_path(saved_model_dir)
+        exported_path = output_dir / f"{weights_path.stem}_int8.tflite"
+
+        if saved_model_dir is None or calibration_path is None:
+            model = YOLO(args.weights)
+            saved_model_export_kwargs = {
+                **export_kwargs,
+                "format": "saved_model",
+                "half": False,
+                "int8": False,
+            }
+            saved_model_dir = Path(str(model.export(**saved_model_export_kwargs)))
+            calibration_path = saved_model_dir / "tmp_tflite_int8_calibration_images.npy"
+
+        saved_model_pb = saved_model_dir / "saved_model.pb"
+        saved_model_size_mb = saved_model_pb.stat().st_size / (1024 * 1024) if saved_model_pb.exists() else 0.0
+        if is_wsl() and saved_model_size_mb > 256:
+            existing_int8 = find_existing_int8_tflite(
+                search_dirs=[output_dir, saved_model_dir, weights_path.parent],
+                stem=weights_path.stem,
+            )
+            if existing_int8 is None:
+                raise RuntimeError(
+                    "SavedModel is too large for stable INT8 conversion inside WSL "
+                    f"({saved_model_size_mb:.1f} MB), and no reusable INT8 TFLite artifact was found."
+                )
+            exported_path = copy_exported_model(existing_int8, output_dir)
+        else:
+            quantize_saved_model_to_int8(
+                saved_model_dir=saved_model_dir,
+                output_path=exported_path,
+                calibration_path=calibration_path,
+                sample_count=args.calibration_samples,
+            )
     else:
+        model = YOLO(args.weights)
         exported = model.export(**export_kwargs)
-        exported_path = copy_exported_model(Path(str(exported)), Path(args.output_dir) / name)
+        exported_path = copy_exported_model(Path(str(exported)), output_dir)
 
     write_metadata(
         exported_path.with_suffix(".json"),

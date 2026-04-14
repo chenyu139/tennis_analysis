@@ -14,6 +14,7 @@ import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.chenyu.tennisanalysis.pipeline.AnalyzerSettings
+import com.chenyu.tennisanalysis.pipeline.BallDetector
 import com.chenyu.tennisanalysis.pipeline.CameraFrameAnalyzer
 import com.chenyu.tennisanalysis.pipeline.DelegatePreference
 import com.chenyu.tennisanalysis.pipeline.DetectorConfig
@@ -33,6 +34,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var overlayView: OverlayView
     private lateinit var analysisExecutor: ExecutorService
     private lateinit var playerDetector: PlayerDetector
+    private var ballDetector: BallDetector? = null
 
     private val overlayStateStore = OverlayStateStore()
 
@@ -74,6 +76,26 @@ class MainActivity : AppCompatActivity() {
                 )
             )
         )
+        ballDetector = if (BuildConfig.ENABLE_BALL_DETECTION) {
+            BallDetector(
+                context = this,
+                config = DetectorConfig(
+                    assetFileName = "ball_detector.tflite",
+                    inputWidth = 640,
+                    inputHeight = 640,
+                    confidenceThreshold = 0.2f,
+                    iouThreshold = 0.2f,
+                    trackedClassIds = setOf(0),
+                    metadataAssetName = "ball_detector.json",
+                    runtimeConfig = RuntimeConfig(
+                        preferredDelegate = DelegatePreference.NNAPI,
+                        numThreads = 4
+                    )
+                )
+            )
+        } else {
+            null
+        }
 
         if (hasCameraPermission()) {
             startCamera()
@@ -99,20 +121,20 @@ class MainActivity : AppCompatActivity() {
 
             val analyzer = CameraFrameAnalyzer(
                 playerDetector = playerDetector,
-                ballDetector = null,
+                ballDetector = ballDetector,
                 courtDetector = null,
-                playerTracker = SortTracker(minHits = 1),
-                ballTracker = com.chenyu.tennisanalysis.pipeline.BallTrackFilter(),
+                playerTracker = SortTracker(maxAge = 10, minHits = 1, iouThreshold = 0.15f),
+                ballTracker = com.chenyu.tennisanalysis.pipeline.BallTrackFilter(maxLostFrames = 10),
                 shotEventEngine = ShotEventEngine(),
                 statsAccumulator = StatsAccumulator(),
                 overlayStateStore = overlayStateStore,
                 settings = AnalyzerSettings(
                     playerFrameStride = 1,
-                    ballFrameStride = 2,
+                    ballFrameStride = 4,
                     courtFrameStride = 45,
-                    enableBallDetection = false,
+                    enableBallDetection = BuildConfig.ENABLE_BALL_DETECTION,
                     enableCourtDetection = false,
-                    showPerformanceStats = true,
+                    showPerformanceStats = false,
                     latencyCompensationScale = 0f
                 )
             )

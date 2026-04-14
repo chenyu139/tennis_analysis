@@ -38,7 +38,8 @@ class CameraFrameAnalyzer(
             emptyList()
         }
         val afterPlayerNs = SystemClock.elapsedRealtimeNanos()
-        val trackedPlayers = if (!settings.enableBallDetection && !settings.enableCourtDetection) {
+        val usePlayerTracker = settings.enableBallDetection || settings.enableCourtDetection || settings.playerFrameStride > 1
+        val trackedPlayers = if (!usePlayerTracker) {
             currentFramePlayers(playerDetections, timestampNs)
         } else {
             playerTracker.update(playerDetections, timestampNs)
@@ -59,10 +60,16 @@ class CameraFrameAnalyzer(
         }
         val afterCourtNs = SystemClock.elapsedRealtimeNanos()
 
-        val ballDetections = if (settings.enableBallDetection && ballDetector != null && frameIndex % settings.ballFrameStride == 0) {
+        val ballRoi = BallRoiBuilder.build(lastBallBox, lastCourt)
+        val ballStride = if (ballRoi == null) {
+            maxOf(settings.ballFrameStride * 4, 8)
+        } else {
+            settings.ballFrameStride
+        }
+        val ballDetections = if (settings.enableBallDetection && ballDetector != null && frameIndex % ballStride == 0) {
             ballDetector.detect(
                 bitmap = bitmap,
-                roi = BallRoiBuilder.build(lastBallBox, lastCourt),
+                roi = ballRoi,
                 timestampNs = timestampNs
             )
         } else {

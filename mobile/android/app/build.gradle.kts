@@ -6,6 +6,7 @@ plugins {
 android {
     namespace = "com.chenyu.tennisanalysis"
     compileSdk = 34
+    flavorDimensions += "modelSet"
 
     defaultConfig {
         applicationId = "com.chenyu.tennisanalysis"
@@ -13,6 +14,9 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -27,6 +31,17 @@ android {
         }
     }
 
+    productFlavors {
+        create("playerOnly") {
+            dimension = "modelSet"
+            buildConfigField("boolean", "ENABLE_BALL_DETECTION", "false")
+        }
+        create("full") {
+            dimension = "modelSet"
+            buildConfigField("boolean", "ENABLE_BALL_DETECTION", "true")
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -37,12 +52,16 @@ android {
     }
 
     buildFeatures {
+        buildConfig = true
         viewBinding = true
     }
 
     sourceSets {
         getByName("main") {
             assets.setSrcDirs(listOf("src/playerOnlyAssets"))
+        }
+        getByName("full") {
+            assets.srcDirs("src/main/assets")
         }
     }
 
@@ -66,7 +85,6 @@ dependencies {
     implementation("androidx.camera:camera-view:1.3.4")
 
     implementation("org.tensorflow:tensorflow-lite:2.16.1")
-    implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
     implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
