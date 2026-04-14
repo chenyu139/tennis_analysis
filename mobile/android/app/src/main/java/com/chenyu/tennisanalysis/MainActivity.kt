@@ -14,10 +14,7 @@ import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.chenyu.tennisanalysis.pipeline.AnalyzerSettings
-import com.chenyu.tennisanalysis.pipeline.BallDetector
-import com.chenyu.tennisanalysis.pipeline.BallTrackFilter
 import com.chenyu.tennisanalysis.pipeline.CameraFrameAnalyzer
-import com.chenyu.tennisanalysis.pipeline.CourtKeypointDetector
 import com.chenyu.tennisanalysis.pipeline.DelegatePreference
 import com.chenyu.tennisanalysis.pipeline.DetectorConfig
 import com.chenyu.tennisanalysis.pipeline.OverlayStateStore
@@ -36,8 +33,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var overlayView: OverlayView
     private lateinit var analysisExecutor: ExecutorService
     private lateinit var playerDetector: PlayerDetector
-    private lateinit var ballDetector: BallDetector
-    private lateinit var courtDetector: CourtKeypointDetector
 
     private val overlayStateStore = OverlayStateStore()
 
@@ -46,6 +41,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         previewView = findViewById(R.id.previewView)
+        previewView.scaleType = PreviewView.ScaleType.FILL_CENTER
         overlayHost = findViewById(R.id.overlayHost)
         overlayView = OverlayView(this)
         overlayHost.addView(
@@ -69,41 +65,12 @@ class MainActivity : AppCompatActivity() {
                 assetFileName = "player_detector.tflite",
                 inputWidth = 640,
                 inputHeight = 640,
-                confidenceThreshold = 0.2f,
+                confidenceThreshold = 0.3f,
                 trackedClassIds = setOf(0),
                 metadataAssetName = "player_detector.json",
                 runtimeConfig = RuntimeConfig(
-                    preferredDelegate = DelegatePreference.AUTO,
+                    preferredDelegate = DelegatePreference.NNAPI,
                     numThreads = 4
-                )
-            )
-        )
-        ballDetector = BallDetector(
-            context = this,
-            config = DetectorConfig(
-                assetFileName = "ball_detector.tflite",
-                inputWidth = 640,
-                inputHeight = 640,
-                confidenceThreshold = 0.15f,
-                trackedClassIds = setOf(0),
-                metadataAssetName = "ball_detector.json",
-                runtimeConfig = RuntimeConfig(
-                    preferredDelegate = DelegatePreference.AUTO,
-                    numThreads = 4
-                )
-            )
-        )
-        courtDetector = CourtKeypointDetector(
-            context = this,
-            config = DetectorConfig(
-                assetFileName = "court_keypoints.tflite",
-                inputWidth = 224,
-                inputHeight = 224,
-                confidenceThreshold = 0f,
-                metadataAssetName = "court_keypoints.json",
-                runtimeConfig = RuntimeConfig(
-                    preferredDelegate = DelegatePreference.CPU,
-                    numThreads = 2
                 )
             )
         )
@@ -132,20 +99,21 @@ class MainActivity : AppCompatActivity() {
 
             val analyzer = CameraFrameAnalyzer(
                 playerDetector = playerDetector,
-                ballDetector = ballDetector,
-                courtDetector = courtDetector,
+                ballDetector = null,
+                courtDetector = null,
                 playerTracker = SortTracker(minHits = 1),
-                ballTracker = BallTrackFilter(),
+                ballTracker = com.chenyu.tennisanalysis.pipeline.BallTrackFilter(),
                 shotEventEngine = ShotEventEngine(),
                 statsAccumulator = StatsAccumulator(),
                 overlayStateStore = overlayStateStore,
                 settings = AnalyzerSettings(
-                    playerFrameStride = 2,
+                    playerFrameStride = 1,
                     ballFrameStride = 2,
                     courtFrameStride = 45,
                     enableBallDetection = false,
                     enableCourtDetection = false,
-                    showPerformanceStats = true
+                    showPerformanceStats = true,
+                    latencyCompensationScale = 0f
                 )
             )
 
@@ -180,8 +148,6 @@ class MainActivity : AppCompatActivity() {
         analysisExecutor.shutdown()
         overlayStateStore.clear()
         playerDetector.close()
-        ballDetector.close()
-        courtDetector.close()
         super.onDestroy()
     }
 

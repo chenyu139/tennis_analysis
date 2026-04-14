@@ -7,8 +7,8 @@ import androidx.camera.core.ImageProxy
 
 class CameraFrameAnalyzer(
     private val playerDetector: PlayerDetector,
-    private val ballDetector: BallDetector,
-    private val courtDetector: CourtKeypointDetector,
+    private val ballDetector: BallDetector?,
+    private val courtDetector: CourtKeypointDetector?,
     private val playerTracker: SortTracker,
     private val ballTracker: BallTrackFilter,
     private val shotEventEngine: ShotEventEngine,
@@ -38,9 +38,13 @@ class CameraFrameAnalyzer(
             emptyList()
         }
         val afterPlayerNs = SystemClock.elapsedRealtimeNanos()
-        val trackedPlayers = playerTracker.update(playerDetections, timestampNs)
+        val trackedPlayers = if (!settings.enableBallDetection && !settings.enableCourtDetection) {
+            currentFramePlayers(playerDetections, timestampNs)
+        } else {
+            playerTracker.update(playerDetections, timestampNs)
+        }
 
-        if (settings.enableCourtDetection && (frameIndex % settings.courtFrameStride == 0 || lastCourt == null)) {
+        if (settings.enableCourtDetection && courtDetector != null && (frameIndex % settings.courtFrameStride == 0 || lastCourt == null)) {
             val candidateCourt = courtDetector.detect(bitmap, timestampNs)
             lastCourt = candidateCourt?.takeIf {
                 isPlausibleCourt(
@@ -55,7 +59,7 @@ class CameraFrameAnalyzer(
         }
         val afterCourtNs = SystemClock.elapsedRealtimeNanos()
 
-        val ballDetections = if (settings.enableBallDetection && frameIndex % settings.ballFrameStride == 0) {
+        val ballDetections = if (settings.enableBallDetection && ballDetector != null && frameIndex % settings.ballFrameStride == 0) {
             ballDetector.detect(
                 bitmap = bitmap,
                 roi = BallRoiBuilder.build(lastBallBox, lastCourt),
@@ -71,10 +75,11 @@ class CameraFrameAnalyzer(
         }
         lastBallBox = trackedBall?.bbox
         val afterBallNs = SystemClock.elapsedRealtimeNanos()
+        val displayPlayers = trackedPlayers
 
         val events = shotEventEngine.update(
             ShotEventInput(
-                players = trackedPlayers,
+                players = displayPlayers,
                 ball = trackedBall,
                 court = lastCourt
             ),
@@ -83,7 +88,7 @@ class CameraFrameAnalyzer(
 
         val stats = statsAccumulator.update(
             StatsInput(
-                players = trackedPlayers,
+                players = displayPlayers,
                 ball = trackedBall,
                 events = events,
                 court = lastCourt
@@ -96,7 +101,7 @@ class CameraFrameAnalyzer(
                 timestampNs = timestampNs,
                 sourceWidth = bitmap.width,
                 sourceHeight = bitmap.height,
-                players = trackedPlayers,
+                players = displayPlayers,
                 ball = trackedBall,
                 court = lastCourt,
                 events = events,
@@ -116,7 +121,6 @@ class CameraFrameAnalyzer(
         )
 
         frameIndex += 1
-        bitmap.recycle()
         image.close()
     }
 
@@ -143,6 +147,35 @@ class CameraFrameAnalyzer(
 
     private fun nanosToMs(durationNs: Long): Float {
         return durationNs / 1_000_000f
+    }
+
+    private fun currentFramePlayers(
+        detections: List<Detection>,
+        timestampNs: Long
+    ): List<TrackedObject> {
+        return detections
+            .filter { detection ->
+                val width = detection.bbox.width()
+                val height = detection.bbox.height()
+                val aspectRatio = height / width.coerceAtLeast(1f)
+                aspectRatio in 1.05f..4.5f && width >= 12f && height >= 24f
+            }
+            .sortedWith(
+                compareByDescending<Detection> { it.bbox.bottom }
+                    .thenByDescending { it.score }
+            )
+            .take(2)
+            .mapIndexed { index, detection ->
+                TrackedObject(
+                    trackId = index + 1,
+                    classId = detection.classId,
+                    score = detection.score,
+                    bbox = RectF(detection.bbox),
+                    center = centerOf(detection.bbox),
+                    velocity = null,
+                    timestampNs = timestampNs
+                )
+            }
     }
 
     private fun isPlausibleCourt(

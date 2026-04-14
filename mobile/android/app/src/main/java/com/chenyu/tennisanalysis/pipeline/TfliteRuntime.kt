@@ -2,8 +2,12 @@ package com.chenyu.tennisanalysis.pipeline
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Rect
 import org.json.JSONArray
 import org.json.JSONObject
+import org.tensorflow.lite.DataType
 import org.tensorflow.lite.Delegate
 import org.tensorflow.lite.Interpreter
 import java.io.FileInputStream
@@ -49,11 +53,23 @@ abstract class BaseTfliteModel(
     protected val inputSpec: InputSpec = resolveInputSpec()
     private val gpuDelegate: AutoCloseable?
     protected val interpreter: Interpreter?
+    private val inputTensorInfo: TensorInfo?
+    private val outputTensorInfo: TensorInfo?
+    private val resizePaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val resizeDstRect = Rect(0, 0, inputSpec.width, inputSpec.height)
+    private var inputBitmap: Bitmap? = null
+    private var inputCanvas: Canvas? = null
+    private var inputPixels = IntArray(inputSpec.width * inputSpec.height)
+    private var rgbInputBuffer: ByteBuffer? = null
+    private var normalizedInputBuffer: ByteBuffer? = null
+    private val outputInfo by lazy { allocateFloatOutput() }
 
     init {
         val delegateBundle = createInterpreter(context, config.assetFileName, config.runtimeConfig)
         gpuDelegate = delegateBundle?.second
         interpreter = delegateBundle?.first
+        inputTensorInfo = interpreter?.getInputTensor(0)?.toTensorInfo()
+        outputTensorInfo = interpreter?.getOutputTensor(0)?.toTensorInfo()
     }
 
     private fun createInterpreter(
@@ -65,9 +81,10 @@ abstract class BaseTfliteModel(
             val mappedBuffer = loadModelBuffer(context, assetFileName)
             val options = Interpreter.Options().apply {
                 setNumThreads(runtimeConfig.numThreads)
+                setUseXNNPACK(runtimeConfig.preferredDelegate != DelegatePreference.NNAPI)
             }
 
-            val delegate = maybeCreateGpuDelegate(runtimeConfig.preferredDelegate)
+            val delegate = maybeCreateDelegate(runtimeConfig.preferredDelegate)
             if (delegate != null) {
                 options.addDelegate(delegate.first)
             }
@@ -113,59 +130,50 @@ abstract class BaseTfliteModel(
     }
 
     protected fun createRgbInput(bitmap: Bitmap): ByteBuffer {
-        val resized = Bitmap.createScaledBitmap(bitmap, inputSpec.width, inputSpec.height, true)
-        val input = ByteBuffer.allocateDirect(inputSpec.width * inputSpec.height * 3 * 4)
-        input.order(ByteOrder.nativeOrder())
-        val pixels = IntArray(inputSpec.width * inputSpec.height).also {
-            resized.getPixels(it, 0, inputSpec.width, 0, 0, inputSpec.width, inputSpec.height)
-        }
+        val pixels = readResizedPixels(bitmap)
+        val tensorInfo = inputTensorInfo
+        val input = ensureInputBuffer(normalized = false).apply { rewind() }
+        val inputValueScale = resolveRgbInputValueScale()
 
         if (inputSpec.layout == "NHWC") {
             for (pixel in pixels) {
-                input.putFloat(((pixel shr 16) and 0xFF) / 255f)
-                input.putFloat(((pixel shr 8) and 0xFF) / 255f)
-                input.putFloat((pixel and 0xFF) / 255f)
+                input.putTensorValue(((pixel shr 16) and 0xFF) / inputValueScale, tensorInfo)
+                input.putTensorValue(((pixel shr 8) and 0xFF) / inputValueScale, tensorInfo)
+                input.putTensorValue((pixel and 0xFF) / inputValueScale, tensorInfo)
             }
         } else {
             for (channel in 0..2) {
                 for (pixel in pixels) {
                     val value = when (channel) {
-                        0 -> ((pixel shr 16) and 0xFF) / 255f
-                        1 -> ((pixel shr 8) and 0xFF) / 255f
-                        else -> (pixel and 0xFF) / 255f
+                        0 -> ((pixel shr 16) and 0xFF) / inputValueScale
+                        1 -> ((pixel shr 8) and 0xFF) / inputValueScale
+                        else -> (pixel and 0xFF) / inputValueScale
                     }
-                    input.putFloat(value)
+                    input.putTensorValue(value, tensorInfo)
                 }
             }
-        }
-
-        if (resized !== bitmap) {
-            resized.recycle()
         }
         input.rewind()
         return input
     }
 
     protected fun createNormalizedInput(bitmap: Bitmap): ByteBuffer {
+        val tensorInfo = inputTensorInfo
         val mean = metadata?.normalizeMean?.takeIf { it.size == 3 }?.toFloatArray()
             ?: floatArrayOf(0.485f, 0.456f, 0.406f)
         val std = metadata?.normalizeStd?.takeIf { it.size == 3 }?.toFloatArray()
             ?: floatArrayOf(0.229f, 0.224f, 0.225f)
-        val resized = Bitmap.createScaledBitmap(bitmap, inputSpec.width, inputSpec.height, true)
-        val input = ByteBuffer.allocateDirect(inputSpec.width * inputSpec.height * 3 * 4)
-        input.order(ByteOrder.nativeOrder())
-        val pixels = IntArray(inputSpec.width * inputSpec.height).also {
-            resized.getPixels(it, 0, inputSpec.width, 0, 0, inputSpec.width, inputSpec.height)
-        }
+        val pixels = readResizedPixels(bitmap)
+        val input = ensureInputBuffer(normalized = true).apply { rewind() }
 
         if (inputSpec.layout == "NHWC") {
             for (pixel in pixels) {
                 val r = (((pixel shr 16) and 0xFF) / 255f - mean[0]) / std[0]
                 val g = (((pixel shr 8) and 0xFF) / 255f - mean[1]) / std[1]
                 val b = (((pixel) and 0xFF) / 255f - mean[2]) / std[2]
-                input.putFloat(r)
-                input.putFloat(g)
-                input.putFloat(b)
+                input.putTensorValue(r, tensorInfo)
+                input.putTensorValue(g, tensorInfo)
+                input.putTensorValue(b, tensorInfo)
             }
         } else {
             for (channel in 0..2) {
@@ -175,31 +183,45 @@ abstract class BaseTfliteModel(
                         1 -> ((pixel shr 8) and 0xFF) / 255f
                         else -> (pixel and 0xFF) / 255f
                     }
-                    input.putFloat((value - mean[channel]) / std[channel])
+                    input.putTensorValue((value - mean[channel]) / std[channel], tensorInfo)
                 }
             }
-        }
-
-        if (resized !== bitmap) {
-            resized.recycle()
         }
         input.rewind()
         return input
     }
 
     protected fun allocateFloatOutput(): Pair<ByteBuffer, IntArray>? {
-        val outputTensor = interpreter?.getOutputTensor(0) ?: return null
-        val shape = outputTensor.shape()
-        val size = shape.fold(1) { acc, dimension -> acc * dimension }
-        return ByteBuffer.allocateDirect(size * 4).apply {
+        val tensorInfo = outputTensorInfo ?: return null
+        return ByteBuffer.allocateDirect(tensorInfo.numBytes).apply {
             order(ByteOrder.nativeOrder())
-        } to shape
+        } to tensorInfo.shape
     }
 
     protected fun readFloatOutput(outputBuffer: ByteBuffer, shape: IntArray): FloatArray {
         outputBuffer.rewind()
         val size = shape.fold(1) { acc, dimension -> acc * dimension }
-        return FloatArray(size).also { outputBuffer.asFloatBuffer().get(it) }
+        val tensorInfo = outputTensorInfo ?: return FloatArray(size)
+        return when (tensorInfo.dataType) {
+            DataType.FLOAT32 -> FloatArray(size).also { outputBuffer.asFloatBuffer().get(it) }
+            DataType.UINT8 -> FloatArray(size) { index ->
+                val raw = outputBuffer.get(index).toInt() and 0xFF
+                (raw - tensorInfo.zeroPoint) * tensorInfo.scale
+            }
+
+            DataType.INT8 -> FloatArray(size) { index ->
+                val raw = outputBuffer.get(index).toInt()
+                (raw - tensorInfo.zeroPoint) * tensorInfo.scale
+            }
+
+            else -> FloatArray(size)
+        }
+    }
+
+    protected fun outputBufferAndShape(): Pair<ByteBuffer, IntArray>? {
+        val info = outputInfo ?: return null
+        info.first.rewind()
+        return info
     }
 
     fun close() {
@@ -207,10 +229,16 @@ abstract class BaseTfliteModel(
         gpuDelegate?.close()
     }
 
-    private fun maybeCreateGpuDelegate(preference: DelegatePreference): Pair<Delegate, AutoCloseable>? {
-        if (preference == DelegatePreference.CPU) {
-            return null
+    private fun maybeCreateDelegate(preference: DelegatePreference): Pair<Delegate, AutoCloseable>? {
+        return when (preference) {
+            DelegatePreference.CPU -> null
+            DelegatePreference.NNAPI -> maybeCreateNnApiDelegate()
+            DelegatePreference.GPU -> maybeCreateGpuDelegate()
+            DelegatePreference.AUTO -> maybeCreateNnApiDelegate() ?: maybeCreateGpuDelegate()
         }
+    }
+
+    private fun maybeCreateGpuDelegate(): Pair<Delegate, AutoCloseable>? {
 
         return runCatching {
             val compatibilityClass = Class.forName("org.tensorflow.lite.gpu.CompatibilityList")
@@ -227,6 +255,126 @@ abstract class BaseTfliteModel(
             @Suppress("UNCHECKED_CAST")
             (delegate as Delegate) to (delegate as AutoCloseable)
         }.getOrNull()
+    }
+
+    private fun maybeCreateNnApiDelegate(): Pair<Delegate, AutoCloseable>? {
+        return runCatching {
+            val optionsClass = Class.forName("org.tensorflow.lite.nnapi.NnApiDelegate\$Options")
+            val options = optionsClass.getDeclaredConstructor().newInstance().apply {
+                optionsClass.getMethod("setUseNnapiCpu", Boolean::class.javaPrimitiveType).invoke(this, false)
+                optionsClass.getMethod("setAllowFp16", Boolean::class.javaPrimitiveType).invoke(this, true)
+            }
+            val delegateClass = Class.forName("org.tensorflow.lite.nnapi.NnApiDelegate")
+            val delegate = delegateClass.getConstructor(optionsClass).newInstance(options)
+            @Suppress("UNCHECKED_CAST")
+            (delegate as Delegate) to (delegate as AutoCloseable)
+        }.getOrNull()
+    }
+
+    private fun readResizedPixels(bitmap: Bitmap): IntArray {
+        val resized = ensureInputBitmap()
+        val canvas = ensureInputCanvas(resized)
+        canvas.drawBitmap(bitmap, null, resizeDstRect, resizePaint)
+        resized.getPixels(inputPixels, 0, inputSpec.width, 0, 0, inputSpec.width, inputSpec.height)
+        return inputPixels
+    }
+
+    private fun ensureInputBitmap(): Bitmap {
+        val current = inputBitmap
+        if (current != null) {
+            return current
+        }
+        return Bitmap.createBitmap(inputSpec.width, inputSpec.height, Bitmap.Config.ARGB_8888).also {
+            inputBitmap = it
+        }
+    }
+
+    private fun ensureInputCanvas(bitmap: Bitmap): Canvas {
+        val current = inputCanvas
+        if (current != null) {
+            current.setBitmap(bitmap)
+            return current
+        }
+        return Canvas(bitmap).also { inputCanvas = it }
+    }
+
+    private fun ensureInputBuffer(normalized: Boolean): ByteBuffer {
+        val existing = if (normalized) normalizedInputBuffer else rgbInputBuffer
+        val requiredBytes = inputTensorInfo?.numBytes ?: (inputSpec.width * inputSpec.height * 3 * 4)
+        if (existing != null && existing.capacity() == requiredBytes) {
+            return existing
+        }
+        return ByteBuffer.allocateDirect(requiredBytes).apply {
+            order(ByteOrder.nativeOrder())
+        }.also { buffer ->
+            if (normalized) {
+                normalizedInputBuffer = buffer
+            } else {
+                rgbInputBuffer = buffer
+            }
+        }
+    }
+
+    private fun resolveRgbInputValueScale(): Float {
+        val metadataRange = metadata?.inputRange
+        val metadataMax = metadataRange?.getOrNull(1)
+        if (metadataMax != null && metadataMax > 1.5f) {
+            return 1f
+        }
+
+        val tensorInfo = inputTensorInfo
+        if (tensorInfo != null && tensorInfo.dataType != DataType.FLOAT32 && tensorInfo.scale >= 1f) {
+            return 1f
+        }
+        return 255f
+    }
+}
+
+private data class TensorInfo(
+    val shape: IntArray,
+    val dataType: DataType,
+    val scale: Float,
+    val zeroPoint: Int,
+    val numBytes: Int
+)
+
+private fun org.tensorflow.lite.Tensor.toTensorInfo(): TensorInfo {
+    val quantization = quantizationParams()
+    return TensorInfo(
+        shape = shape(),
+        dataType = dataType(),
+        scale = quantization.scale.takeUnless { it == 0f } ?: 1f,
+        zeroPoint = quantization.zeroPoint,
+        numBytes = numBytes()
+    )
+}
+
+private fun ByteBuffer.putTensorValue(value: Float, tensorInfo: TensorInfo?) {
+    when (tensorInfo?.dataType ?: DataType.FLOAT32) {
+        DataType.FLOAT32 -> putFloat(value)
+        DataType.UINT8 -> {
+            val info = tensorInfo ?: run {
+                putFloat(value)
+                return
+            }
+            val quantized = (value / info.scale + info.zeroPoint)
+                .toInt()
+                .coerceIn(0, 255)
+            put(quantized.toByte())
+        }
+
+        DataType.INT8 -> {
+            val info = tensorInfo ?: run {
+                putFloat(value)
+                return
+            }
+            val quantized = (value / info.scale + info.zeroPoint)
+                .toInt()
+                .coerceIn(-128, 127)
+            put(quantized.toByte())
+        }
+
+        else -> putFloat(value)
     }
 }
 

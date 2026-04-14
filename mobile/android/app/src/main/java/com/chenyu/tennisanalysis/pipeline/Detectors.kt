@@ -17,7 +17,7 @@ abstract class BaseYoloDetector(
             Bitmap.createBitmap(bitmap, it.left, it.top, it.width(), it.height())
         } ?: bitmap
         val input = createRgbInput(cropped)
-        val outputInfo = allocateFloatOutput() ?: return emptyList()
+        val outputInfo = outputBufferAndShape() ?: return emptyList()
         val outputBuffer = outputInfo.first
         model.run(input, outputBuffer)
         val detections = decodeYoloLikeOutput(
@@ -168,7 +168,7 @@ class CourtKeypointDetector(
     fun detect(bitmap: Bitmap, timestampNs: Long): CourtKeypointSet? {
         val model = interpreter ?: return null
         val input = createNormalizedInput(bitmap)
-        val outputInfo = allocateFloatOutput() ?: return null
+        val outputInfo = outputBufferAndShape() ?: return null
         val outputBuffer = outputInfo.first
         model.run(input, outputBuffer)
         val pointValues = alignCourtOutput(readFloatOutput(outputBuffer, outputInfo.second), outputInfo.second)

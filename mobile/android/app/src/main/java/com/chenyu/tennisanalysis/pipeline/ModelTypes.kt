@@ -6,6 +6,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 
 enum class DelegatePreference {
     AUTO,
+    NNAPI,
     GPU,
     CPU
 }
@@ -107,12 +108,13 @@ data class OverlayFrame(
 )
 
 data class AnalyzerSettings(
-    val playerFrameStride: Int = 2,
+    val playerFrameStride: Int = 1,
     val ballFrameStride: Int = 2,
     val courtFrameStride: Int = 45,
     val enableBallDetection: Boolean = true,
     val enableCourtDetection: Boolean = true,
-    val showPerformanceStats: Boolean = false
+    val showPerformanceStats: Boolean = false,
+    val latencyCompensationScale: Float = 0f
 )
 
 data class ShotEventInput(

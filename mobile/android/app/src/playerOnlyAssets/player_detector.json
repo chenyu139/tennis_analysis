@@ -1,0 +1,24 @@
+{
+  "name": "player",
+  "source_weights": "/home/chenyu/workplace/tennis_analysis/third_party_models/yolov8n.pt",
+  "exported_model": "/home/chenyu/workplace/tennis_analysis/mobile_artifacts/player/yolov8n_int8.tflite",
+  "format": "tflite",
+  "input_shape": [
+    1,
+    640,
+    640,
+    3
+  ],
+  "input_layout": "NHWC",
+  "input_range": [
+    0.0,
+    1.0
+  ],
+  "half": false,
+  "int8": true,
+  "mobile_target": "nnapi",
+  "preferred_delegate": "NNAPI",
+  "tracked_class_ids": [
+    0
+  ]
+}

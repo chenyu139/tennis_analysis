@@ -42,7 +42,7 @@ android {
 
     sourceSets {
         getByName("main") {
-            assets.srcDir("src/main/assets")
+            assets.setSrcDirs(listOf("src/playerOnlyAssets"))
         }
     }
 
