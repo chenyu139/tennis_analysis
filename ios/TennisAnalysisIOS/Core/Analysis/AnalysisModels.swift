@@ -97,11 +97,11 @@ enum AnalysisErrors: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unsupportedVideo:
-            return "Unsupported video asset."
+            return "无法读取该视频文件。"
         case .exportFailed:
-            return "Video export failed."
+            return "视频导出失败。"
         case .modelsNotReady:
-            return "Core ML models are not configured yet."
+            return "Core ML 模型尚未正确配置。"
         }
     }
 }

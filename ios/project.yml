@@ -10,6 +10,7 @@ settings:
     DEVELOPMENT_TEAM: ""
     SWIFT_VERSION: 5.10
     IPHONEOS_DEPLOYMENT_TARGET: 16.0
+    SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
     TARGETED_DEVICE_FAMILY: "1,2"
     SUPPORTS_MACCATALYST: NO
 targets:
@@ -19,11 +20,31 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - path: TennisAnalysisIOS
+        excludes:
+          - Resources/**
     resources:
-      - path: TennisAnalysisIOS/Resources
+      - path: TennisAnalysisIOS/Resources/Models
+        type: folder
+      - path: TennisAnalysisIOS/Resources/Models/ball_detector.json
+      - path: TennisAnalysisIOS/Resources/Models/court_keypoints.json
+      - path: TennisAnalysisIOS/Resources/Models/player_detector.json
+    postBuildScripts:
+      - name: Copy CoreML Model Assets
+        script: |
+          set -euo pipefail
+          SOURCE_MODELS_DIR="${SRCROOT}/TennisAnalysisIOS/Resources/Models"
+          DESTINATION_MODELS_DIR="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Models"
+          mkdir -p "${DESTINATION_MODELS_DIR}"
+          cp -R "${SOURCE_MODELS_DIR}/player_detector.mlmodelc" "${DESTINATION_MODELS_DIR}/"
+          cp -R "${SOURCE_MODELS_DIR}/ball_detector.mlmodelc" "${DESTINATION_MODELS_DIR}/"
+          cp -R "${SOURCE_MODELS_DIR}/court_keypoints.mlmodelc" "${DESTINATION_MODELS_DIR}/"
+          cp "${SOURCE_MODELS_DIR}/player_detector.json" "${DESTINATION_MODELS_DIR}/"
+          cp "${SOURCE_MODELS_DIR}/ball_detector.json" "${DESTINATION_MODELS_DIR}/"
+          cp "${SOURCE_MODELS_DIR}/court_keypoints.json" "${DESTINATION_MODELS_DIR}/"
     settings:
       base:
         PRODUCT_NAME: TennisAnalysisIOS
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
         INFOPLIST_KEY_CFBundleDisplayName: TennisAnalysisIOS
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.sports
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES

@@ -10,11 +10,13 @@ struct DetectorConfig {
     let trackedClassIds: Set<Int>
 }
 
-final class BaseCoreMLModel {
+class BaseCoreMLModel {
     let model: MLModel
     let metadata: ModelMetadata
     let inputName: String
     let outputName: String
+    let inputImageWidth: Int
+    let inputImageHeight: Int
 
     init(modelBaseName: String) throws {
         self.metadata = try ModelAssetLocator.metadata(baseName: modelBaseName)
@@ -22,6 +24,24 @@ final class BaseCoreMLModel {
         self.model = try MLModel(contentsOf: modelURL)
         self.inputName = model.modelDescription.inputDescriptionsByName.keys.first ?? "image"
         self.outputName = model.modelDescription.outputDescriptionsByName.keys.first ?? "output"
+
+        if let imageConstraint = model.modelDescription.inputDescriptionsByName[inputName]?.imageConstraint {
+            self.inputImageWidth = imageConstraint.pixelsWide
+            self.inputImageHeight = imageConstraint.pixelsHigh
+        } else {
+            let inputShape = metadata.inputShape ?? []
+            let layout = metadata.inputLayout?.uppercased()
+            if layout == "NHWC", inputShape.count >= 4 {
+                self.inputImageHeight = inputShape[inputShape.count - 3]
+                self.inputImageWidth = inputShape[inputShape.count - 2]
+            } else if inputShape.count >= 2 {
+                self.inputImageHeight = inputShape[inputShape.count - 2]
+                self.inputImageWidth = inputShape[inputShape.count - 1]
+            } else {
+                self.inputImageWidth = 640
+                self.inputImageHeight = 640
+            }
+        }
     }
 }
 
@@ -34,8 +54,13 @@ final class YoloCoreMLDetector: BaseCoreMLModel {
     }
 
     func detect(sampleBuffer: CMSampleBuffer, timestampNs: UInt64) async throws -> [Detection] {
-        let pixelBuffer = try PixelBufferTools.pixelBuffer(from: sampleBuffer)
-        let provider = try MLDictionaryFeatureProvider(dictionary: [inputName: pixelBuffer])
+        let sourcePixelBuffer = try PixelBufferTools.pixelBuffer(from: sampleBuffer)
+        let modelPixelBuffer = try PixelBufferTools.resizedPixelBuffer(
+            from: sourcePixelBuffer,
+            width: inputImageWidth,
+            height: inputImageHeight
+        )
+        let provider = try MLDictionaryFeatureProvider(dictionary: [inputName: modelPixelBuffer])
         let output = try model.prediction(from: provider)
         guard let multiArray = output.featureValue(for: outputName)?.multiArrayValue else {
             return []
@@ -43,8 +68,8 @@ final class YoloCoreMLDetector: BaseCoreMLModel {
         return decodeYoloLikeOutput(
             outputArray: multiArray.toFloatArray(),
             outputShape: multiArray.shape.map(\.intValue),
-            sourceWidth: CVPixelBufferGetWidth(pixelBuffer),
-            sourceHeight: CVPixelBufferGetHeight(pixelBuffer),
+            sourceWidth: CVPixelBufferGetWidth(sourcePixelBuffer),
+            sourceHeight: CVPixelBufferGetHeight(sourcePixelBuffer),
             timestampNs: timestampNs
         )
     }
@@ -88,9 +113,8 @@ final class YoloCoreMLDetector: BaseCoreMLModel {
             maxCoordinate = max(maxCoordinate, value(candidateIndex: candidateIndex, attributeIndex: 3))
         }
         let normalizedCoordinates = maxCoordinate <= 2
-        let inputShape = metadata.inputShape ?? []
-        let inputWidth = inputShape.count >= 1 ? inputShape[inputShape.count - 1] : sourceWidth
-        let inputHeight = inputShape.count >= 2 ? inputShape[inputShape.count - 2] : sourceHeight
+        let inputWidth = inputImageWidth
+        let inputHeight = inputImageHeight
 
         var detections: [Detection] = []
         for candidateIndex in 0..<candidateCount {

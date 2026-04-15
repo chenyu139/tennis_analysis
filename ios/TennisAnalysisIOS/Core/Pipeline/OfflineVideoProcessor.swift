@@ -19,8 +19,8 @@ final class OfflineVideoProcessor {
         let duration = try await asset.load(.duration)
         let estimatedFrameCount = max(1, Int(duration.seconds * Double(max(frameRate, 1))))
 
-        progressHandler(0.05, "Loaded video metadata at \(Int(frameRate)) fps.")
-        progressHandler(0.10, "Preparing offline analysis for frame size \(Int(frameSize.width))x\(Int(frameSize.height)).")
+        progressHandler(0.05, "已读取视频信息，帧率 \(Int(frameRate)) fps。")
+        progressHandler(0.10, "正在准备离线分析，视频尺寸 \(Int(frameSize.width))x\(Int(frameSize.height))。")
 
         let playerDetector = try PlayerCoreMLDetector()
         let ballDetector = try BallCoreMLDetector()
@@ -37,7 +37,7 @@ final class OfflineVideoProcessor {
             progressHandler: progressHandler
         )
 
-        progressHandler(0.72, "Analysis complete. Rendering overlays and exporting video...")
+        progressHandler(0.72, "分析完成，正在渲染叠加层并导出视频...")
 
         let outputURL = assetIO.makeOutputURL(for: inputURL)
         if FileManager.default.fileExists(atPath: outputURL.path) {
@@ -54,7 +54,7 @@ final class OfflineVideoProcessor {
             progressHandler: progressHandler
         )
 
-        progressHandler(1.0, "Finished exporting \(outputURL.lastPathComponent).")
+        progressHandler(1.0, "已完成导出：\(outputURL.lastPathComponent)。")
         return outputURL
     }
 
@@ -106,7 +106,7 @@ final class OfflineVideoProcessor {
             frameIndex += 1
             if frameIndex % 10 == 0 {
                 let progress = 0.10 + (0.55 * min(Double(frameIndex) / Double(estimatedFrameCount), 1.0))
-                progressHandler(progress, "Analyzing frame \(frameIndex)/\(estimatedFrameCount)...")
+                progressHandler(progress, "正在分析第 \(frameIndex) / \(estimatedFrameCount) 帧...")
             }
         }
 
@@ -214,7 +214,7 @@ final class OfflineVideoProcessor {
             frameIndex += 1
             if frameIndex % 10 == 0 {
                 let progress = 0.72 + (0.27 * min(Double(frameIndex) / Double(estimatedFrameCount), 1.0))
-                progressHandler(progress, "Rendering frame \(frameIndex)/\(estimatedFrameCount)...")
+                progressHandler(progress, "正在渲染第 \(frameIndex) / \(estimatedFrameCount) 帧...")
             }
         }
 
@@ -271,7 +271,7 @@ final class OfflineVideoProcessor {
     }
 
     private func finishWriting(writer: AVAssetWriter) async throws {
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             writer.finishWriting {
                 if let error = writer.error {
                     continuation.resume(throwing: error)

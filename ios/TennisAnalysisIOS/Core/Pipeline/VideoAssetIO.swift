@@ -11,7 +11,8 @@ struct VideoAssetIO {
         guard let track = try? await asset.loadTracks(withMediaType: .video).first else {
             return 24
         }
-        return track.nominalFrameRate > 0 ? track.nominalFrameRate : 24
+        let frameRate = (try? await track.load(.nominalFrameRate)) ?? 0
+        return frameRate > 0 ? frameRate : 24
     }
 
     func frameSize(for asset: AVAsset) async throws -> CGSize {
@@ -20,7 +21,7 @@ struct VideoAssetIO {
         }
         let size = try await track.load(.naturalSize)
         let transform = try await track.load(.preferredTransform)
-        return size.applying(transform).integral.absoluteSize
+        return CGRect(origin: .zero, size: size).applying(transform).integral.absoluteSize
     }
 
     func makeFrameReader(for asset: AVAsset) async throws -> (AVAssetReader, AVAssetReaderTrackOutput, AVAssetTrack) {
@@ -78,7 +79,15 @@ struct VideoAssetIO {
     }
 
     func makeOutputURL(for inputURL: URL) -> URL {
-        let outputDirectory = FileManager.default.temporaryDirectory
+        let fileManager = FileManager.default
+        let outputDirectory: URL
+        if let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first {
+            let exportsDirectory = documentsDirectory.appendingPathComponent("Exports", isDirectory: true)
+            try? fileManager.createDirectory(at: exportsDirectory, withIntermediateDirectories: true)
+            outputDirectory = exportsDirectory
+        } else {
+            outputDirectory = fileManager.temporaryDirectory
+        }
         let baseName = inputURL.deletingPathExtension().lastPathComponent
         return outputDirectory.appendingPathComponent("\(baseName)_analyzed.mp4")
     }

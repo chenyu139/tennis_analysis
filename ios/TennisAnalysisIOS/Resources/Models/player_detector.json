@@ -1,0 +1,24 @@
+{
+  "name": "player",
+  "source_weights": "/Users/chenyu/workspace/tennis_analysis/models/yolov8x.pt",
+  "exported_model": "/Users/chenyu/workspace/tennis_analysis/mobile_artifacts/player/player_detector.mlpackage",
+  "format": "coreml",
+  "input_shape": [
+    1,
+    640,
+    640,
+    3
+  ],
+  "input_layout": "NHWC",
+  "input_range": [
+    0.0,
+    1.0
+  ],
+  "half": false,
+  "int8": false,
+  "mobile_target": "ane",
+  "preferred_delegate": "ANE",
+  "tracked_class_ids": [
+    0
+  ]
+}

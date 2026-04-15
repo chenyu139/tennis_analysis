@@ -1,4 +1,6 @@
 .venv
+.venv-ios-export
+.DS_Store
 __pycache__
 *.npy
 *.pt
@@ -17,3 +19,10 @@ mobile/android/app/src/main/assets/*.json
 models/*.onnx
 models/*_saved_model/
 third_party_models/
+compiled_coreml/
+models/*.mlpackage/
+ios/TennisAnalysisIOS/Resources/Models/*.mlmodelc/
+ios/run_logs/
+ios/TennisAnalysisIOS.xcodeproj/xcuserdata/
+ios/TennisAnalysisIOS.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcuserstate

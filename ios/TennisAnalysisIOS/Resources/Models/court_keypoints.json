@@ -1,0 +1,29 @@
+{
+  "name": "court",
+  "source_weights": "/Users/chenyu/workspace/tennis_analysis/models/keypoints_model.pth",
+  "exported_model": "/Users/chenyu/workspace/tennis_analysis/mobile_artifacts/court_keypoints.mlpackage",
+  "format": "coreml",
+  "input_shape": [
+    1,
+    3,
+    224,
+    224
+  ],
+  "input_layout": "NCHW",
+  "normalize_mean": [
+    0.485,
+    0.456,
+    0.406
+  ],
+  "normalize_std": [
+    0.229,
+    0.224,
+    0.225
+  ],
+  "output_shape": [
+    1,
+    28
+  ],
+  "mobile_target": "ane",
+  "preferred_delegate": "ANE"
+}
