@@ -6,6 +6,7 @@ __pycache__
 *.pt
 *.pth
 *.avi
+*.mp4
 output_videos/*
 *.iml
 .idea/

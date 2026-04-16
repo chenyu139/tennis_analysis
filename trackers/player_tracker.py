@@ -3,7 +3,7 @@ import cv2
 import pickle
 import sys
 sys.path.append('../')
-from utils import measure_distance, get_center_of_bbox
+from utils import measure_distance, get_center_of_bbox, get_foot_position
 
 class PlayerTracker:
     def __init__(self,model_path):
@@ -83,14 +83,66 @@ class PlayerTracker:
         
         return player_dict
 
+    def _draw_player_ring(self, frame, bbox, track_id):
+        foot_x, foot_y = get_foot_position(bbox)
+        foot_x = int(foot_x)
+        foot_y = int(foot_y)
+        player_width = max(int(bbox[2] - bbox[0]), 1)
+        ring_width = max(int(player_width * 0.7), 18)
+        ring_height = max(int(ring_width * 0.28), 8)
+
+        overlay = frame.copy()
+
+        # Add a soft glow beneath the player so the ring reads clearly on court.
+        cv2.ellipse(
+            overlay,
+            (foot_x, foot_y),
+            (ring_width + 8, ring_height + 5),
+            0,
+            0,
+            360,
+            (210, 210, 210),
+            -1
+        )
+        cv2.addWeighted(overlay, 0.18, frame, 0.82, 0, frame)
+
+        cv2.ellipse(
+            frame,
+            (foot_x, foot_y),
+            (ring_width, ring_height),
+            0,
+            0,
+            360,
+            (255, 255, 255),
+            3
+        )
+        cv2.ellipse(
+            frame,
+            (foot_x, foot_y),
+            (max(ring_width - 8, 6), max(ring_height - 3, 3)),
+            0,
+            0,
+            360,
+            (235, 235, 235),
+            1
+        )
+
+        label_origin = (foot_x - ring_width, max(int(bbox[1]) - 12, 24))
+        cv2.putText(
+            frame,
+            f"P{track_id}",
+            label_origin,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 255),
+            2
+        )
+
     def draw_bboxes(self,video_frames, player_detections):
         output_video_frames = []
         for frame, player_dict in zip(video_frames, player_detections):
-            # Draw Bounding Boxes
             for track_id, bbox in player_dict.items():
-                x1, y1, x2, y2 = bbox
-                cv2.putText(frame, f"Player ID: {track_id}",(int(bbox[0]),int(bbox[1] -10 )),cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
-                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 2)
+                self._draw_player_ring(frame, bbox, track_id)
             output_video_frames.append(frame)
         
         return output_video_frames

@@ -2,6 +2,7 @@ from ultralytics import YOLO
 import cv2
 import pickle
 import pandas as pd
+import numpy as np
 
 class BallTracker:
     def __init__(self,model_path):
@@ -95,14 +96,50 @@ class BallTracker:
         
         return ball_dict
 
+    def _draw_flame(self, frame, bbox):
+        x1, y1, x2, y2 = [int(value) for value in bbox]
+        center_x = int((x1 + x2) / 2)
+        center_y = int((y1 + y2) / 2)
+        ball_size = max(int(max(x2 - x1, y2 - y1)), 8)
+
+        glow = frame.copy()
+        cv2.circle(glow, (center_x, center_y), ball_size + 10, (0, 90, 255), -1)
+        cv2.circle(glow, (center_x, center_y), ball_size + 4, (0, 180, 255), -1)
+        cv2.addWeighted(glow, 0.28, frame, 0.72, 0, frame)
+
+        flame_base = [
+            (center_x, center_y - ball_size - 12),
+            (center_x - ball_size - 5, center_y + 2),
+            (center_x, center_y + ball_size + 8),
+            (center_x + ball_size + 5, center_y + 2),
+        ]
+        inner_flame = [
+            (center_x, center_y - ball_size - 4),
+            (center_x - max(ball_size // 2, 4), center_y + 1),
+            (center_x, center_y + max(ball_size // 2, 5)),
+            (center_x + max(ball_size // 2, 4), center_y + 1),
+        ]
+
+        cv2.fillConvexPoly(frame, np.array(flame_base, dtype=np.int32), (0, 80, 255))
+        cv2.fillConvexPoly(frame, np.array(inner_flame, dtype=np.int32), (0, 215, 255))
+        cv2.circle(frame, (center_x, center_y + 1), max(ball_size // 2, 4), (255, 255, 255), -1)
+        cv2.circle(frame, (center_x, center_y + 1), max(ball_size // 3, 2), (0, 230, 255), -1)
+
+        cv2.putText(
+            frame,
+            "Ball",
+            (center_x + ball_size + 6, max(center_y - ball_size - 6, 20)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 215, 255),
+            2
+        )
+
     def draw_bboxes(self,video_frames, player_detections):
         output_video_frames = []
         for frame, ball_dict in zip(video_frames, player_detections):
-            # Draw Bounding Boxes
             for track_id, bbox in ball_dict.items():
-                x1, y1, x2, y2 = bbox
-                cv2.putText(frame, f"Ball ID: {track_id}",(int(bbox[0]),int(bbox[1] -10 )),cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 255), 2)
-                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 255), 2)
+                self._draw_flame(frame, bbox)
             output_video_frames.append(frame)
         
         return output_video_frames

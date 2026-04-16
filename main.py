@@ -1,3 +1,5 @@
+import argparse
+import os
 from utils import (read_video, 
                    save_video,
                    measure_distance,
@@ -13,23 +15,47 @@ import pandas as pd
 import numpy as np
 from copy import deepcopy
 
+DEFAULT_INPUT_VIDEO = "input_videos/input_video.mp4"
+DEFAULT_OUTPUT_VIDEO = "output_videos/output_video.avi"
+PLAYER_STUB_PATH = "tracker_stubs/player_detections.pkl"
+BALL_STUB_PATH = "tracker_stubs/ball_detections.pkl"
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input-video", default=DEFAULT_INPUT_VIDEO, help="Path to the input tennis video.")
+    parser.add_argument("--output-video", default=DEFAULT_OUTPUT_VIDEO, help="Path to the output annotated video.")
+    parser.add_argument(
+        "--use-stubs",
+        action="store_true",
+        help="Reuse tracker stub files instead of running fresh player and ball detection."
+    )
+    return parser.parse_args()
+
 
 def main():
-    # Read Video
-    input_video_path = "input_videos/input_video.mp4"
+    args = parse_args()
+    input_video_path = args.input_video
+    output_video_path = args.output_video
+    use_stubs = args.use_stubs
+    player_stub_path = PLAYER_STUB_PATH if use_stubs else None
+    ball_stub_path = BALL_STUB_PATH if use_stubs else None
+
     video_frames = read_video(input_video_path)
+    if not video_frames:
+        raise ValueError(f"No frames found in input video: {input_video_path}")
 
     # Detect Players and Ball
     player_tracker = PlayerTracker(model_path='yolov8x')
     ball_tracker = BallTracker(model_path='models/yolo5_last.pt')
 
     player_detections = player_tracker.detect_frames(video_frames,
-                                                     read_from_stub=True,
-                                                     stub_path="tracker_stubs/player_detections.pkl"
+                                                     read_from_stub=use_stubs,
+                                                     stub_path=player_stub_path
                                                      )
     ball_detections = ball_tracker.detect_frames(video_frames,
-                                                     read_from_stub=True,
-                                                     stub_path="tracker_stubs/ball_detections.pkl"
+                                                     read_from_stub=use_stubs,
+                                                     stub_path=ball_stub_path
                                                      )
     ball_detections = ball_tracker.interpolate_ball_positions(ball_detections)
     
@@ -180,7 +206,8 @@ def main():
     for i, frame in enumerate(output_video_frames):
         cv2.putText(frame, f"Frame: {i}",(10,30),cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-    save_video(output_video_frames, "output_videos/output_video.avi")
+    os.makedirs(os.path.dirname(output_video_path) or ".", exist_ok=True)
+    save_video(output_video_frames, output_video_path)
 
 if __name__ == "__main__":
     main()
