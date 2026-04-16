@@ -7,7 +7,7 @@ struct FrameRenderer {
     func render(
         pixelBuffer: CVPixelBuffer,
         overlay: OverlayFrame,
-        playerMiniCourtPositions: [Int: CGPoint],
+        playerMiniCourtPositions: [Int: CGPoint]? = nil,
         ballMiniCourtPosition: CGPoint?
     ) {
         CVPixelBufferLockBaseAddress(pixelBuffer, [])
@@ -35,12 +35,14 @@ struct FrameRenderer {
         drawPlayers(context: context, players: overlay.players)
         drawBall(context: context, ball: overlay.ball)
         drawCourtKeypoints(context: context, keypoints: overlay.court?.points ?? [])
-        drawMiniCourt(
-            context: context,
-            frameSize: overlay.sourceSize,
-            playerPositions: playerMiniCourtPositions,
-            ballPosition: ballMiniCourtPosition
-        )
+        if let playerMiniCourtPositions {
+            drawMiniCourt(
+                context: context,
+                frameSize: overlay.sourceSize,
+                playerPositions: playerMiniCourtPositions,
+                ballPosition: ballMiniCourtPosition
+            )
+        }
         if let stats = overlay.stats {
             drawStats(context: context, frameSize: overlay.sourceSize, stats: stats)
         }

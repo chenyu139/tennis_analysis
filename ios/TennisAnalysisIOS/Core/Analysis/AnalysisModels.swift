@@ -93,6 +93,8 @@ enum AnalysisErrors: LocalizedError {
     case unsupportedVideo
     case exportFailed
     case modelsNotReady
+    case cameraUnavailable
+    case cameraPermissionDenied
 
     var errorDescription: String? {
         switch self {
@@ -102,6 +104,10 @@ enum AnalysisErrors: LocalizedError {
             return "视频导出失败。"
         case .modelsNotReady:
             return "Core ML 模型尚未正确配置。"
+        case .cameraUnavailable:
+            return "当前设备无法启动摄像头。"
+        case .cameraPermissionDenied:
+            return "没有摄像头权限，请在系统设置中允许访问相机。"
         }
     }
 }

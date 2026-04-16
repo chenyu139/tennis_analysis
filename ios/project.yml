@@ -47,6 +47,7 @@ targets:
         SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
         INFOPLIST_KEY_CFBundleDisplayName: TennisAnalysisIOS
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.sports
+        INFOPLIST_KEY_NSCameraUsageDescription: 需要使用摄像头采集球场画面并实时进行网球检测叠框。
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UIFileSharingEnabled: YES
         INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES

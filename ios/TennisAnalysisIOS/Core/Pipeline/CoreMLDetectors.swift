@@ -54,28 +54,30 @@ final class YoloCoreMLDetector: BaseCoreMLModel {
     }
 
     func detect(sampleBuffer: CMSampleBuffer, timestampNs: UInt64) async throws -> [Detection] {
-        let sourcePixelBuffer = try PixelBufferTools.pixelBuffer(from: sampleBuffer)
-        let modelPixelBuffer = try PixelBufferTools.resizedPixelBuffer(
-            from: sourcePixelBuffer,
-            width: inputImageWidth,
-            height: inputImageHeight
-        )
-        let provider = try MLDictionaryFeatureProvider(dictionary: [inputName: modelPixelBuffer])
-        let output = try model.prediction(from: provider)
-        guard let multiArray = output.featureValue(for: outputName)?.multiArrayValue else {
-            return []
+        try autoreleasepool {
+            let sourcePixelBuffer = try PixelBufferTools.pixelBuffer(from: sampleBuffer)
+            let modelPixelBuffer = try PixelBufferTools.resizedPixelBuffer(
+                from: sourcePixelBuffer,
+                width: inputImageWidth,
+                height: inputImageHeight
+            )
+            let provider = try MLDictionaryFeatureProvider(dictionary: [inputName: modelPixelBuffer])
+            let output = try model.prediction(from: provider)
+            guard let multiArray = output.featureValue(for: outputName)?.multiArrayValue else {
+                return []
+            }
+            return decodeYoloLikeOutput(
+                multiArray: multiArray,
+                outputShape: multiArray.shape.map(\.intValue),
+                sourceWidth: CVPixelBufferGetWidth(sourcePixelBuffer),
+                sourceHeight: CVPixelBufferGetHeight(sourcePixelBuffer),
+                timestampNs: timestampNs
+            )
         }
-        return decodeYoloLikeOutput(
-            outputArray: multiArray.toFloatArray(),
-            outputShape: multiArray.shape.map(\.intValue),
-            sourceWidth: CVPixelBufferGetWidth(sourcePixelBuffer),
-            sourceHeight: CVPixelBufferGetHeight(sourcePixelBuffer),
-            timestampNs: timestampNs
-        )
     }
 
     private func decodeYoloLikeOutput(
-        outputArray: [Float],
+        multiArray: MLMultiArray,
         outputShape: [Int],
         sourceWidth: Int,
         sourceHeight: Int,
@@ -97,9 +99,9 @@ final class YoloCoreMLDetector: BaseCoreMLModel {
 
         func value(candidateIndex: Int, attributeIndex: Int) -> Float {
             if transposed {
-                return outputArray[attributeIndex * candidateCount + candidateIndex]
+                return multiArray.floatValue(atFlatIndex: attributeIndex * candidateCount + candidateIndex)
             }
-            return outputArray[candidateIndex * attributeCount + attributeIndex]
+            return multiArray.floatValue(atFlatIndex: candidateIndex * attributeCount + attributeIndex)
         }
 
         let hasObjectness = attributeCount == 6 || attributeCount == 85
@@ -244,32 +246,34 @@ final class CourtCoreMLDetector: CourtKeypointDetecting {
     }
 
     func detectCourtKeypoints(sampleBuffer: CMSampleBuffer) async throws -> [CGPoint] {
-        let pixelBuffer = try PixelBufferTools.pixelBuffer(from: sampleBuffer)
-        let inputShape = metadata.inputShape ?? [1, 3, 224, 224]
-        let width = inputShape[inputShape.count - 1]
-        let height = inputShape[inputShape.count - 2]
-        let multiArray = try PixelBufferTools.normalizedMultiArray(
-            from: pixelBuffer,
-            width: width,
-            height: height,
-            mean: metadata.normalizeMean ?? [0.485, 0.456, 0.406],
-            std: metadata.normalizeStd ?? [0.229, 0.224, 0.225]
-        )
-        let provider = try MLDictionaryFeatureProvider(dictionary: [inputName: multiArray])
-        let output = try model.prediction(from: provider)
-        guard let resultArray = output.featureValue(for: outputName)?.multiArrayValue else {
-            return []
-        }
-        let values = alignCourtOutput(outputArray: resultArray.toFloatArray(), outputShape: resultArray.shape.map(\.intValue))
-        guard values.count >= 28 else { return [] }
-
-        let sourceWidth = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
-        let sourceHeight = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
-        return stride(from: 0, to: 28, by: 2).map { index in
-            CGPoint(
-                x: CGFloat(values[index]) * sourceWidth / CGFloat(width),
-                y: CGFloat(values[index + 1]) * sourceHeight / CGFloat(height)
+        try autoreleasepool {
+            let pixelBuffer = try PixelBufferTools.pixelBuffer(from: sampleBuffer)
+            let inputShape = metadata.inputShape ?? [1, 3, 224, 224]
+            let width = inputShape[inputShape.count - 1]
+            let height = inputShape[inputShape.count - 2]
+            let multiArray = try PixelBufferTools.normalizedMultiArray(
+                from: pixelBuffer,
+                width: width,
+                height: height,
+                mean: metadata.normalizeMean ?? [0.485, 0.456, 0.406],
+                std: metadata.normalizeStd ?? [0.229, 0.224, 0.225]
             )
+            let provider = try MLDictionaryFeatureProvider(dictionary: [inputName: multiArray])
+            let output = try model.prediction(from: provider)
+            guard let resultArray = output.featureValue(for: outputName)?.multiArrayValue else {
+                return []
+            }
+            let values = alignCourtOutput(outputArray: resultArray.toFloatArray(), outputShape: resultArray.shape.map(\.intValue))
+            guard values.count >= 28 else { return [] }
+
+            let sourceWidth = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
+            let sourceHeight = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
+            return stride(from: 0, to: 28, by: 2).map { index in
+                CGPoint(
+                    x: CGFloat(values[index]) * sourceWidth / CGFloat(width),
+                    y: CGFloat(values[index + 1]) * sourceHeight / CGFloat(height)
+                )
+            }
         }
     }
 
@@ -301,6 +305,21 @@ extension CMSampleBuffer {
 }
 
 private extension MLMultiArray {
+    func floatValue(atFlatIndex index: Int) -> Float {
+        switch dataType {
+        case .float32:
+            let pointer = dataPointer.bindMemory(to: Float.self, capacity: count)
+            return pointer[index]
+        case .double:
+            let pointer = dataPointer.bindMemory(to: Double.self, capacity: count)
+            return Float(pointer[index])
+        case .float16:
+            return self[index].floatValue
+        default:
+            return self[index].floatValue
+        }
+    }
+
     func toFloatArray() -> [Float] {
         let count = self.count
         switch dataType {

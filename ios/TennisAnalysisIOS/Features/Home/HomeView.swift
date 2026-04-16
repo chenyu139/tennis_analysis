@@ -1,33 +1,47 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
-struct HomeView: View {
-    @StateObject private var viewModel: HomeViewModel
-    @State private var isImporterPresented = false
+private enum AnalysisMode: String, CaseIterable, Identifiable {
+    case camera
+    case offline
 
-    init(viewModel: HomeViewModel) {
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .camera:
+            return "实时摄像头"
+        case .offline:
+            return "离线视频"
+        }
+    }
+}
+
+struct HomeView: View {
+    @Environment(\.scenePhase) private var scenePhase
+
+    @StateObject private var viewModel: HomeViewModel
+    @StateObject private var cameraAnalyzer: LiveCameraAnalyzer
+    @State private var isImporterPresented = false
+    @State private var selectedMode: AnalysisMode = .camera
+
+    init(viewModel: HomeViewModel, cameraAnalyzer: LiveCameraAnalyzer = LiveCameraAnalyzer()) {
         _viewModel = StateObject(wrappedValue: viewModel)
+        _cameraAnalyzer = StateObject(wrappedValue: cameraAnalyzer)
     }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    headerCard
-                    selectedVideoCard
-                    actionCard
-                    exportsCard
-                    statusCard
-                    eventCard
-                    tipsCard
+            Group {
+                if selectedMode == .camera {
+                    cameraBody
+                } else {
+                    offlineBody
                 }
-                .padding(16)
-                .frame(maxWidth: 760, alignment: .leading)
-                .frame(maxWidth: .infinity)
             }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("离线分析")
         }
+        .toolbar(selectedMode == .camera ? .hidden : .visible, for: .navigationBar)
         .fileImporter(
             isPresented: $isImporterPresented,
             allowedContentTypes: [.movie],
@@ -39,21 +53,168 @@ struct HomeView: View {
             viewModel.refreshExportedVideos()
             viewModel.prepareAutoProcessingIfRequested()
         }
+        .task(id: selectedMode) {
+            if selectedMode == .camera, scenePhase == .active {
+                cameraAnalyzer.start()
+            } else {
+                cameraAnalyzer.stop()
+            }
+        }
+        .onChange(of: scenePhase) { newValue in
+            if selectedMode != .camera { return }
+            if newValue == .active {
+                cameraAnalyzer.start()
+            } else {
+                cameraAnalyzer.stop()
+            }
+        }
+        .onDisappear {
+            cameraAnalyzer.stop()
+        }
+    }
+
+    private var cameraBody: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            LiveCameraPreviewView(analyzer: cameraAnalyzer)
+                .ignoresSafeArea()
+
+            if cameraAnalyzer.latestOverlay == nil {
+                VStack(spacing: 12) {
+                    Image(systemName: "camera.viewfinder")
+                        .font(.system(size: 42))
+                        .foregroundStyle(.white.opacity(0.92))
+                    Text(cameraAnalyzer.statusText)
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 28)
+                }
+            }
+        }
+        .overlay(alignment: .top) {
+            HStack(alignment: .top, spacing: 12) {
+                Picker("输入模式", selection: $selectedMode) {
+                    ForEach(AnalysisMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                Text(cameraAnalyzer.isRunning ? "运行中" : "未运行")
+                    .font(.footnote.weight(.semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+                    .foregroundStyle(.white)
+            }
+            .padding(.top, 12)
+            .padding(.horizontal, 12)
+        }
+        .overlay(alignment: .bottom) {
+            VStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(cameraAnalyzer.statusText)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.white)
+
+                    Text(cameraAnalyzer.streamInfoText)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.88))
+                        .lineLimit(2)
+
+                    if let latestEvent = cameraAnalyzer.recentEvents.first {
+                        Text(latestEvent)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.75))
+                            .lineLimit(1)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                HStack(spacing: 10) {
+                    Button {
+                        if cameraAnalyzer.isRunning {
+                            cameraAnalyzer.stop()
+                        } else {
+                            cameraAnalyzer.start()
+                        }
+                    } label: {
+                        Label(cameraAnalyzer.isRunning ? "停止检测" : "启动检测", systemImage: cameraAnalyzer.isRunning ? "pause.circle.fill" : "play.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.blue)
+
+                    Button {
+                        selectedMode = .offline
+                    } label: {
+                        Label("离线模式", systemImage: "film")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.white)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+            .frame(maxWidth: 560)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 12)
+        }
+    }
+
+    private var offlineBody: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                headerCard
+                modeCard
+                selectedVideoCard
+                actionCard
+                exportsCard
+                statusCard
+                eventCard
+                tipsCard
+            }
+            .padding(16)
+            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("离线分析")
     }
 
     private var headerCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("网球视频离线分析")
+            Text(selectedMode == .camera ? "网球实时检测" : "网球视频离线分析")
                 .font(.system(.largeTitle, design: .rounded, weight: .bold))
 
-            Text("在手机上导入本地比赛视频，完成球员检测、网球检测、球场关键点识别和带叠加层的视频导出。")
-                .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.92))
+            Text(
+                selectedMode == .camera
+                    ? "直接从手机摄像头采集画面，实时完成球员检测、网球检测和球场关键点识别，并把叠框结果即时显示在屏幕上。"
+                    : "在手机上导入本地比赛视频，完成球员检测、网球检测、球场关键点识别和带叠加层的视频导出。"
+            )
+            .font(.subheadline)
+            .foregroundStyle(.white.opacity(0.92))
 
             HStack(spacing: 10) {
                 featureChip(title: "球员检测", systemImage: "person.2.fill")
                 featureChip(title: "网球追踪", systemImage: "tennisball.fill")
-                featureChip(title: "结果导出", systemImage: "square.and.arrow.down.fill")
+                featureChip(
+                    title: selectedMode == .camera ? "实时叠框" : "结果导出",
+                    systemImage: selectedMode == .camera ? "camera.viewfinder" : "square.and.arrow.down.fill"
+                )
             }
         }
         .foregroundStyle(.white)
@@ -61,12 +222,23 @@ struct HomeView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             LinearGradient(
-                colors: [Color.blue, Color.cyan],
+                colors: selectedMode == .camera ? [Color.indigo, Color.blue] : [Color.blue, Color.cyan],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
         )
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private var modeCard: some View {
+        card(title: "输入模式", systemImage: "arrow.triangle.branch") {
+            Picker("输入模式", selection: $selectedMode) {
+                ForEach(AnalysisMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
     }
 
     private var selectedVideoCard: some View {
@@ -207,16 +379,7 @@ struct HomeView: View {
         card(title: "最近事件", systemImage: "text.append") {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(Array(viewModel.recentEvents.enumerated()), id: \.offset) { _, event in
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "circle.fill")
-                            .font(.system(size: 7))
-                            .foregroundStyle(.blue)
-                            .padding(.top, 5)
-                        Text(event)
-                            .font(.footnote)
-                            .foregroundStyle(.primary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    statusEventRow(event)
                 }
             }
         }
@@ -251,6 +414,19 @@ struct HomeView: View {
             .padding(.vertical, 8)
             .background(Color.white.opacity(0.18))
             .clipShape(Capsule())
+    }
+
+    private func statusEventRow(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "circle.fill")
+                .font(.system(size: 7))
+                .foregroundStyle(.blue)
+                .padding(.top, 5)
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private func tipRow(_ text: String) -> some View {

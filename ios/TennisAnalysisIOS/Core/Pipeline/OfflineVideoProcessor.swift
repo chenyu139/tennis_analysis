@@ -71,10 +71,12 @@ final class OfflineVideoProcessor {
         let (reader, output, _) = try await assetIO.makeFrameReader(for: asset)
         var playerTracker = SortTracker()
         var ballTrackFilter = BallTrackFilter()
-        var frameDetections: [FrameDetections] = []
         var playerBoxesPerFrame: [[Int: BoundingBox]] = []
         var ballBoxesPerFrame: [BoundingBox?] = []
         var courtKeypoints: [CGPoint] = []
+
+        playerBoxesPerFrame.reserveCapacity(estimatedFrameCount)
+        ballBoxesPerFrame.reserveCapacity(estimatedFrameCount)
 
         guard reader.startReading() else {
             throw reader.error ?? AnalysisErrors.unsupportedVideo
@@ -94,12 +96,6 @@ final class OfflineVideoProcessor {
             let ballDetectionsRaw = try await ballDetector.detectDetections(sampleBuffer: sampleBuffer)
             let trackedBall = ballTrackFilter.update(detections: ballDetectionsRaw, timestampNs: timestampNs)
 
-            frameDetections.append(
-                FrameDetections(
-                    players: playerBoxes,
-                    ball: trackedBall?.bbox
-                )
-            )
             playerBoxesPerFrame.append(playerBoxes)
             ballBoxesPerFrame.append(trackedBall?.bbox)
 
@@ -183,32 +179,34 @@ final class OfflineVideoProcessor {
                 try await Task.sleep(nanoseconds: 2_000_000)
             }
 
-            let renderBuffer = try PixelBufferTools.copyPixelBuffer(
-                from: imageBuffer,
-                using: adaptor.pixelBufferPool
-            )
-            let overlay = makeOverlayFrame(
-                frameIndex: frameIndex,
-                timestampNs: sampleBuffer.timestampNs,
-                frameSize: frameSize,
-                analysisArtifacts: analysisArtifacts
-            )
-            let playerPositions = frameIndex < analysisArtifacts.playerMiniCourtDetections.count
-                ? analysisArtifacts.playerMiniCourtDetections[frameIndex]
-                : [:]
-            let ballPosition = frameIndex < analysisArtifacts.ballMiniCourtDetections.count
-                ? analysisArtifacts.ballMiniCourtDetections[frameIndex][1]
-                : nil
-            renderer.render(
-                pixelBuffer: renderBuffer,
-                overlay: overlay,
-                playerMiniCourtPositions: playerPositions,
-                ballMiniCourtPosition: ballPosition
-            )
-
             let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            guard adaptor.append(renderBuffer, withPresentationTime: presentationTime) else {
-                throw writer.error ?? AnalysisErrors.exportFailed
+            try autoreleasepool {
+                let renderBuffer = try PixelBufferTools.copyPixelBuffer(
+                    from: imageBuffer,
+                    using: adaptor.pixelBufferPool
+                )
+                let overlay = makeOverlayFrame(
+                    frameIndex: frameIndex,
+                    timestampNs: sampleBuffer.timestampNs,
+                    frameSize: frameSize,
+                    analysisArtifacts: analysisArtifacts
+                )
+                let playerPositions = frameIndex < analysisArtifacts.playerMiniCourtDetections.count
+                    ? analysisArtifacts.playerMiniCourtDetections[frameIndex]
+                    : [:]
+                let ballPosition = frameIndex < analysisArtifacts.ballMiniCourtDetections.count
+                    ? analysisArtifacts.ballMiniCourtDetections[frameIndex][1]
+                    : nil
+                renderer.render(
+                    pixelBuffer: renderBuffer,
+                    overlay: overlay,
+                    playerMiniCourtPositions: playerPositions,
+                    ballMiniCourtPosition: ballPosition
+                )
+
+                guard adaptor.append(renderBuffer, withPresentationTime: presentationTime) else {
+                    throw writer.error ?? AnalysisErrors.exportFailed
+                }
             }
 
             frameIndex += 1

@@ -63,6 +63,19 @@ enum PixelBufferTools {
         return output
     }
 
+    static func makeCGImage(from pixelBuffer: CVPixelBuffer) -> CGImage? {
+        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        return ciContext.createCGImage(
+            image,
+            from: CGRect(
+                x: 0,
+                y: 0,
+                width: CVPixelBufferGetWidth(pixelBuffer),
+                height: CVPixelBufferGetHeight(pixelBuffer)
+            )
+        )
+    }
+
     static func normalizedMultiArray(
         from pixelBuffer: CVPixelBuffer,
         width: Int,

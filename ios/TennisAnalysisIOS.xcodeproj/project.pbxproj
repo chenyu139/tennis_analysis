@@ -18,6 +18,7 @@
 		622F6F1E2DD38E59B2DC9F8E /* CoreVideo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DE951573811F5CC4559B2C32 /* CoreVideo.framework */; };
 		72487FE856D9B749869778B2 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A063096D11D4FB503D67DE52 /* CoreGraphics.framework */; };
 		7952823D27D52FC4A9FA6B3C /* VideoAssetIO.swift in Sources */ = {isa = PBXBuildFile; fileRef = D042B72670C10E4D2E92B861 /* VideoAssetIO.swift */; };
+		8152AC57C87878B3675EB6E4 /* LiveCameraAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63A0B177B5C41CD3B85D668A /* LiveCameraAnalyzer.swift */; };
 		825F021CD1423F02A0AAFB6D /* BallPostProcessing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4368E36F4BA5FF2B88A95CFB /* BallPostProcessing.swift */; };
 		8609FE35F1D1BFE3189F008D /* AnalysisModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0331106BD0BCD84929A32415 /* AnalysisModels.swift */; };
 		86FFDA46D16951EC882FB774 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 968DE3163F033907D51BF57D /* HomeView.swift */; };
@@ -26,6 +27,7 @@
 		A37A64D1BEB5643CF6AE5D60 /* AnalysisConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = D454729E77FED3256AEAD3BA /* AnalysisConstants.swift */; };
 		ADC304E92CBB2E32541D6892 /* Geometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CD891F0032A490CD016E4E4 /* Geometry.swift */; };
 		B26D6A57856943B4780675E0 /* DetectorProtocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89EF319AA1C95120B0B881A0 /* DetectorProtocols.swift */; };
+		C34E56F29341D627DB5E4DC2 /* LiveCameraPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 968F782EFAB0DA87B303C2BB /* LiveCameraPreviewView.swift */; };
 		D1A8AA2B739C8EDF3202DC15 /* HomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B19BE7EB11DF9B09A7A81BC4 /* HomeViewModel.swift */; };
 		D5BC53A1FDA62C0C9356CD6D /* CoreMLDetectors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FFCEE50A7DBA36080007EBE /* CoreMLDetectors.swift */; };
 		D91E85A3AF2189FD2E3AE053 /* PlayerSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A88EDE4E6027237842B1AB72 /* PlayerSelection.swift */; };
@@ -44,12 +46,14 @@
 		48F30BB7F02E81F421F902EF /* OfflineVideoProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineVideoProcessor.swift; sourceTree = "<group>"; };
 		49A9B30C7FE09C109F104C9E /* CoreML.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreML.framework; path = System/Library/Frameworks/CoreML.framework; sourceTree = SDKROOT; };
 		4A29F519B101826B98260750 /* FrameRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameRenderer.swift; sourceTree = "<group>"; };
+		63A0B177B5C41CD3B85D668A /* LiveCameraAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCameraAnalyzer.swift; sourceTree = "<group>"; };
 		68638F0F3D237BD61DBA3F74 /* CoreImage.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreImage.framework; path = System/Library/Frameworks/CoreImage.framework; sourceTree = SDKROOT; };
 		6E4AD875F3B2118C94A3B9EF /* CoreMedia.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreMedia.framework; path = System/Library/Frameworks/CoreMedia.framework; sourceTree = SDKROOT; };
 		876895B76CEE8891BFBC7BA9 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 		89EF319AA1C95120B0B881A0 /* DetectorProtocols.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetectorProtocols.swift; sourceTree = "<group>"; };
 		8D05CEF28D2BD7D8143DE662 /* TennisAnalysisIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TennisAnalysisIOSApp.swift; sourceTree = "<group>"; };
 		968DE3163F033907D51BF57D /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		968F782EFAB0DA87B303C2BB /* LiveCameraPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCameraPreviewView.swift; sourceTree = "<group>"; };
 		9CD891F0032A490CD016E4E4 /* Geometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Geometry.swift; sourceTree = "<group>"; };
 		A063096D11D4FB503D67DE52 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 		A279A42396F538430BF8E116 /* ModelMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelMetadata.swift; sourceTree = "<group>"; };
@@ -145,6 +149,7 @@
 			children = (
 				968DE3163F033907D51BF57D /* HomeView.swift */,
 				B19BE7EB11DF9B09A7A81BC4 /* HomeViewModel.swift */,
+				968F782EFAB0DA87B303C2BB /* LiveCameraPreviewView.swift */,
 			);
 			path = Home;
 			sourceTree = "<group>";
@@ -154,6 +159,7 @@
 			children = (
 				1FFCEE50A7DBA36080007EBE /* CoreMLDetectors.swift */,
 				89EF319AA1C95120B0B881A0 /* DetectorProtocols.swift */,
+				63A0B177B5C41CD3B85D668A /* LiveCameraAnalyzer.swift */,
 				A279A42396F538430BF8E116 /* ModelMetadata.swift */,
 				48F30BB7F02E81F421F902EF /* OfflineVideoProcessor.swift */,
 				BC38D0016D6D28994CD78898 /* PixelBufferTools.swift */,
@@ -287,6 +293,8 @@
 				ADC304E92CBB2E32541D6892 /* Geometry.swift in Sources */,
 				86FFDA46D16951EC882FB774 /* HomeView.swift in Sources */,
 				D1A8AA2B739C8EDF3202DC15 /* HomeViewModel.swift in Sources */,
+				8152AC57C87878B3675EB6E4 /* LiveCameraAnalyzer.swift in Sources */,
+				C34E56F29341D627DB5E4DC2 /* LiveCameraPreviewView.swift in Sources */,
 				0D0C44BEDE65F3B2C291636F /* MiniCourtMapper.swift in Sources */,
 				2ADE297F25559D9C818F6FAE /* ModelMetadata.swift in Sources */,
 				EED26DAFCFAB1AA0066C5AD2 /* OfflineVideoProcessor.swift in Sources */,
@@ -374,6 +382,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = TennisAnalysisIOS;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.sports";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "需要使用摄像头采集球场画面并实时进行网球检测叠框。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -401,6 +410,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = TennisAnalysisIOS;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.sports";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "需要使用摄像头采集球场画面并实时进行网球检测叠框。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
