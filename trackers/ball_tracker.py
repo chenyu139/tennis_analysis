@@ -87,12 +87,15 @@ class BallTracker:
         return ball_detections
 
     def detect_frame(self,frame):
+        if self.model is None:
+            self.model = YOLO(self.model_path)  # FIX: 流式逐帧检测直接调用 detect_frame 时确保模型已初始化
         results = self.model.predict(frame,conf=0.15)[0]
 
         ball_dict = {}
         for box in results.boxes:
             result = box.xyxy.tolist()[0]
             ball_dict[1] = result
+        del results  # FIX: 每帧推理后显式释放检测结果对象，减少长视频处理时内存滞留
         
         return ball_dict
 

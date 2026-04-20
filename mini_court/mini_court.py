@@ -194,11 +194,24 @@ class MiniCourt():
 
         output_player_boxes= []
         output_ball_boxes= []
+        last_player_positions = {}
+        last_ball_position = None
 
         for frame_num, player_bbox in enumerate(player_boxes):
-            ball_box = ball_boxes[frame_num][1]
+            ball_box = ball_boxes[frame_num].get(1)
+            if ball_box is None:
+                output_player_boxes.append(last_player_positions.copy())
+                if last_ball_position is not None:
+                    output_ball_boxes.append({1:last_ball_position})
+                else:
+                    output_ball_boxes.append({})
+                continue
+
             ball_position = get_center_of_bbox(ball_box)
-            closest_player_id_to_ball = min(player_bbox.keys(), key=lambda x: measure_distance(ball_position, get_center_of_bbox(player_bbox[x])))
+            if player_bbox:
+                closest_player_id_to_ball = min(player_bbox.keys(), key=lambda x: measure_distance(ball_position, get_center_of_bbox(player_bbox[x])))
+            else:
+                closest_player_id_to_ball = None
 
             output_player_bboxes_dict = {}
             for player_id, bbox in player_bbox.items():
@@ -212,7 +225,13 @@ class MiniCourt():
                 # Get Player height in pixels
                 frame_index_min = max(0, frame_num-20)
                 frame_index_max = min(len(player_boxes), frame_num+50)
-                bboxes_heights_in_pixels = [get_height_of_bbox(player_boxes[i][player_id]) for i in range (frame_index_min,frame_index_max)]
+                bboxes_heights_in_pixels = [
+                    get_height_of_bbox(player_boxes[i][player_id])
+                    for i in range(frame_index_min, frame_index_max)
+                    if player_id in player_boxes[i]
+                ]  # FIX: 长视频中相邻帧可能暂时丢失某个球员框，计算高度窗口时跳过缺失帧避免 KeyError
+                if not bboxes_heights_in_pixels:
+                    bboxes_heights_in_pixels = [get_height_of_bbox(bbox)]  # FIX: 若窗口内都缺失该球员，则退回当前帧高度继续处理
                 max_player_height_in_pixels = max(bboxes_heights_in_pixels)
 
                 mini_court_player_position = self.get_mini_court_coordinates(foot_position,
@@ -236,7 +255,17 @@ class MiniCourt():
                                                                             max_player_height_in_pixels,
                                                                             player_heights[player_id]
                                                                             )
-                    output_ball_boxes.append({1:mini_court_player_position})
+                    last_ball_position = mini_court_player_position
+
+            for player_id, last_position in last_player_positions.items():
+                output_player_bboxes_dict.setdefault(player_id, last_position)  # FIX: 某帧临时丢失球员框时沿用上一帧小地图坐标，避免后续统计阶段缺键
+
+            if last_ball_position is not None:
+                output_ball_boxes.append({1:last_ball_position})  # FIX: 保持球的小地图轨迹与帧数对齐，避免长视频偶发缺检测导致长度不一致
+            else:
+                output_ball_boxes.append({})
+
+            last_player_positions = output_player_bboxes_dict.copy()
             output_player_boxes.append(output_player_bboxes_dict)
 
         return output_player_boxes , output_ball_boxes
@@ -249,4 +278,3 @@ class MiniCourt():
                 y= int(y)
                 cv2.circle(frame, (x,y), 5, color, -1)
         return frames
-

@@ -69,17 +69,22 @@ class PlayerTracker:
         return player_detections
 
     def detect_frame(self,frame):
+        if self.model is None:
+            self.model = YOLO(self.model_path)  # FIX: 流式逐帧检测直接调用 detect_frame 时确保模型已初始化
         results = self.model.track(frame, persist=True)[0]
         id_name_dict = results.names
 
         player_dict = {}
         for box in results.boxes:
+            if box.id is None:
+                continue  # FIX: 长视频跟踪结果中部分检测框可能还未分配 track id，跳过以避免空指针中断整段处理
             track_id = int(box.id.tolist()[0])
             result = box.xyxy.tolist()[0]
             object_cls_id = box.cls.tolist()[0]
             object_cls_name = id_name_dict[object_cls_id]
             if object_cls_name == "person":
                 player_dict[track_id] = result
+        del results  # FIX: 每帧推理后显式释放检测结果对象，减少长视频处理时内存滞留
         
         return player_dict
 

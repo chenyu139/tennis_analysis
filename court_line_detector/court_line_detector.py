@@ -29,6 +29,8 @@ class CourtLineDetector:
         original_h, original_w = image.shape[:2]
         keypoints[::2] *= original_w / 224.0
         keypoints[1::2] *= original_h / 224.0
+        del outputs  # FIX: 关键点推理完成后显式释放张量结果，减少长视频处理时内存滞留
+        del image_tensor  # FIX: 推理完成后释放输入张量引用，避免临时对象持续占用内存
 
         return keypoints
 
