@@ -3,6 +3,7 @@ const rawCtx = rawCanvas.getContext('2d');
 const overlayCanvas = document.getElementById('overlay-canvas');
 const overlayCtx = overlayCanvas.getContext('2d');
 const modeSelect = document.getElementById('mode-select');
+const effectSelect = document.getElementById('effect-select');
 const overlayRoot = document.getElementById('overlay-status');
 const metricsRoot = document.getElementById('metrics');
 
@@ -14,6 +15,7 @@ let activeSessionId = 0;
 let wsMetadataByFrameId = new Map();
 let rawPlayer = null;
 let overlayPlayer = null;
+let activeShotFx = null;
 
 function renderPairs(root, data) {
   root.innerHTML = '';
@@ -31,6 +33,10 @@ function renderPairs(root, data) {
 
 function getSelectedMode() {
   return modeSelect.value || (runtimeConfig ? runtimeConfig.overlay_mode : 'sei');
+}
+
+function getSelectedEffect() {
+  return effectSelect && effectSelect.value ? effectSelect.value : 'smooth';
 }
 
 function configureModeOptions() {
@@ -232,6 +238,164 @@ function drawSmoothTrail(ctx, points) {
   ctx.restore();
 }
 
+function drawCometTrail(ctx, points, boost = 0) {
+  if (points.length < 2) {
+    return;
+  }
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.shadowBlur = 22 + boost * 10;
+  ctx.shadowColor = 'rgba(111, 208, 255, 0.45)';
+  ctx.strokeStyle = `rgba(86, 196, 255, ${0.22 + boost * 0.16})`;
+  ctx.lineWidth = 14 + boost * 5;
+  traceSmoothTrail(ctx, points);
+  ctx.stroke();
+
+  ctx.strokeStyle = `rgba(230, 250, 255, ${0.55 + boost * 0.2})`;
+  ctx.lineWidth = 4 + boost * 2;
+  traceSmoothTrail(ctx, points);
+  ctx.stroke();
+
+  const head = points[points.length - 1];
+  ctx.fillStyle = `rgba(255, 255, 255, ${0.72 + boost * 0.18})`;
+  ctx.beginPath();
+  ctx.arc(head[0], head[1], 8 + boost * 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawArcadeTrail(ctx, points, boost = 0) {
+  if (points.length < 2) {
+    return;
+  }
+  ctx.save();
+  points.forEach((point, index) => {
+    const alpha = (index + 1) / points.length;
+    const hue = 20 + alpha * 70;
+    ctx.fillStyle = `hsla(${hue}, 100%, 60%, ${0.16 + alpha * 0.42})`;
+    ctx.beginPath();
+    ctx.arc(point[0], point[1], 4 + alpha * 9 + boost * 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.setLineDash([8, 10]);
+  ctx.lineCap = 'round';
+  ctx.shadowBlur = 16 + boost * 8;
+  ctx.shadowColor = 'rgba(255, 120, 0, 0.36)';
+  ctx.strokeStyle = `rgba(255, 210, 0, ${0.35 + boost * 0.15})`;
+  ctx.lineWidth = 6 + boost * 3;
+  traceSmoothTrail(ctx, points);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawImpactTrail(ctx, points, boost = 0) {
+  if (points.length < 2) {
+    return;
+  }
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.shadowBlur = 26 + boost * 12;
+  ctx.shadowColor = 'rgba(255, 90, 0, 0.5)';
+  ctx.strokeStyle = `rgba(255, 80, 0, ${0.24 + boost * 0.18})`;
+  ctx.lineWidth = 22 + boost * 8;
+  traceSmoothTrail(ctx, points);
+  ctx.stroke();
+
+  ctx.shadowBlur = 14 + boost * 6;
+  ctx.shadowColor = 'rgba(255, 220, 120, 0.38)';
+  ctx.strokeStyle = `rgba(255, 196, 64, ${0.48 + boost * 0.2})`;
+  ctx.lineWidth = 10 + boost * 4;
+  traceSmoothTrail(ctx, points);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawTrailByEffect(ctx, points, effect, boost = 0) {
+  if (effect === 'comet') {
+    drawCometTrail(ctx, points, boost);
+    return;
+  }
+  if (effect === 'arcade') {
+    drawArcadeTrail(ctx, points, boost);
+    return;
+  }
+  if (effect === 'impact') {
+    drawImpactTrail(ctx, points, boost);
+    return;
+  }
+  drawSmoothTrail(ctx, points);
+}
+
+function markShotEffect(metadata, ballBox, ballTrail) {
+  if (!metadata || !metadata.shot_event) {
+    return;
+  }
+  const shotPts = Number(metadata.shot_event.pts);
+  const framePts = Number(metadata.pts || 0);
+  if (!Number.isFinite(shotPts) || Math.abs(framePts - shotPts) > 0.12) {
+    return;
+  }
+  const anchor = ballBox
+    ? [((ballBox[0] + ballBox[2]) / 2), ((ballBox[1] + ballBox[3]) / 2)]
+    : ballTrail[ballTrail.length - 1];
+  if (!anchor) {
+    return;
+  }
+  const signature = `${shotPts.toFixed(3)}:${Number(metadata.shot_event.player_id || 0)}`;
+  if (activeShotFx && activeShotFx.signature === signature) {
+    return;
+  }
+  activeShotFx = {
+    signature,
+    startedAt: performance.now(),
+    x: anchor[0],
+    y: anchor[1],
+    speedKmh: Number(metadata.shot_event.speed_kmh || 0),
+  };
+}
+
+function getShotBoost() {
+  if (!activeShotFx) {
+    return 0;
+  }
+  const ageMs = performance.now() - activeShotFx.startedAt;
+  if (ageMs >= 320) {
+    activeShotFx = null;
+    return 0;
+  }
+  return 1 - ageMs / 320;
+}
+
+function drawShotBurst(ctx, effect, boost) {
+  if (!activeShotFx || boost <= 0) {
+    return;
+  }
+  const radiusBase = 34 + boost * 42;
+  const angleStep = effect === 'arcade' ? 6 : 8;
+  ctx.save();
+  ctx.translate(activeShotFx.x, activeShotFx.y);
+  ctx.globalCompositeOperation = 'screen';
+  ctx.strokeStyle = effect === 'comet' ? `rgba(178, 236, 255, ${0.45 + boost * 0.4})` : `rgba(255, 200, 90, ${0.52 + boost * 0.36})`;
+  ctx.lineWidth = 3 + boost * 4;
+  for (let index = 0; index < angleStep; index += 1) {
+    const angle = (Math.PI * 2 * index) / angleStep;
+    const inner = 8 + boost * 8;
+    const outer = radiusBase + (index % 2 === 0 ? 10 : -2);
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(angle) * inner, Math.sin(angle) * inner);
+    ctx.lineTo(Math.cos(angle) * outer, Math.sin(angle) * outer);
+    ctx.stroke();
+  }
+  ctx.fillStyle = `rgba(255, 245, 210, ${0.18 + boost * 0.35})`;
+  ctx.beginPath();
+  ctx.arc(0, 0, 16 + boost * 18, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 function rememberWsMetadata(metadata) {
   if (!metadata || metadata.frame_id === undefined) {
     return;
@@ -286,8 +450,11 @@ function drawOverlay(ctx, canvas, metadata) {
 
   const ballBox = normalizeBox(metadata.ball_box);
   const ballTrail = normalizeTrail(metadata.ball_trail);
+  const effect = getSelectedEffect();
+  markShotEffect(metadata, ballBox, ballTrail);
+  const shotBoost = getShotBoost();
   if (ballTrail.length >= 2) {
-    drawSmoothTrail(ctx, ballTrail);
+    drawTrailByEffect(ctx, ballTrail, effect, shotBoost);
   }
 
   if (ballBox) {
@@ -295,15 +462,17 @@ function drawOverlay(ctx, canvas, metadata) {
     const centerX = (x1 + x2) / 2;
     const centerY = (y1 + y2) / 2;
     const radius = Math.max((x2 - x1) / 2, 6);
-    ctx.fillStyle = 'rgba(255, 140, 0, 0.35)';
+    ctx.fillStyle = `rgba(255, 140, 0, ${0.35 + shotBoost * 0.18})`;
     ctx.beginPath();
-    ctx.arc(centerX, centerY, radius + 8, 0, Math.PI * 2);
+    ctx.arc(centerX, centerY, radius + 8 + shotBoost * 8, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = '#ffde59';
+    ctx.fillStyle = effect === 'comet' ? '#c9f3ff' : '#ffde59';
     ctx.beginPath();
-    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    ctx.arc(centerX, centerY, radius + shotBoost * 2.5, 0, Math.PI * 2);
     ctx.fill();
   }
+
+  drawShotBurst(ctx, effect, shotBoost);
 
   const statusText = `frame=${metadata.frame_id} pts=${Number(metadata.pts || 0).toFixed(3)} status=${metadata.status || 'idle'} mode=${getSelectedMode()}`;
   ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
@@ -541,6 +710,7 @@ async function refreshPanels() {
     ...overlay,
     source_rtmp: runtime.source_rtmp_url || 'n/a',
     analysis_rtmp: runtime.analysis_rtmp_url || 'n/a',
+    effect: getSelectedEffect(),
   });
 }
 
@@ -612,6 +782,10 @@ modeSelect.addEventListener('change', () => {
   }
   startPlayback();
 });
+
+if (effectSelect) {
+  effectSelect.addEventListener('change', refreshPanels);
+}
 
 loadRuntimeConfig().then(() => startPlayback());
 refreshPanels();

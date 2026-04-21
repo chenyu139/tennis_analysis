@@ -8,6 +8,7 @@ from urllib.request import urlopen
 import numpy as np
 
 from realtime.analysis_pipeline import RealtimeAnalysisPipeline
+from realtime.player_history import PlayerTrackState
 from services.demo_server import build_handler
 from services.h264_sei import build_sei_nal, extract_sei_messages
 from services.rtmp_source_service import RtmpSourceService
@@ -81,6 +82,18 @@ class CountingPlayerDetector:
             1: [132, 18, 188, 98],
             2: [138, 146, 198, 228],
         }
+
+
+class SequencePlayerDetector:
+    def __init__(self, detections):
+        self.detections = list(detections)
+        self.calls = 0
+
+    def detect(self, image):
+        del image
+        index = min(self.calls, len(self.detections) - 1)
+        self.calls += 1
+        return self.detections[index]
 
 
 class ProductionLiveStreamServiceTests(unittest.TestCase):
@@ -314,6 +327,83 @@ class ProductionLiveStreamServiceTests(unittest.TestCase):
         self.assertEqual(player_detector.calls, 1)
         self.assertFalse(overlay_first.debug['player_reused'])
         self.assertTrue(overlay_second.debug['player_reused'])
+
+    def test_player_track_state_drops_stale_boxes(self):
+        state = PlayerTrackState(history_size=8)
+
+        first = state.update({1: [120, 20, 180, 96]}, pts=0.0, stale_seconds=0.2)
+        second = state.update({}, pts=0.1, stale_seconds=0.2)
+        third = state.update({}, pts=0.35, stale_seconds=0.2)
+
+        self.assertEqual(list(first.keys()), [1])
+        self.assertEqual(list(second.keys()), [1])
+        self.assertEqual(third, {})
+
+    def test_analysis_pipeline_clears_cached_players_after_empty_refresh(self):
+        temp_dir = tempfile.mkdtemp(prefix='tennis_pipeline_clear_cache_test_')
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        player_detector = SequencePlayerDetector([
+            {1: [132, 18, 188, 98], 2: [138, 146, 198, 228]},
+            {},
+        ])
+        config = PipelineConfig(
+            analysis_fps=25.0,
+            output_fps=25.0,
+            player_detect_every_n_frames=2,
+            player_stale_seconds=0.12,
+            metrics_path=os.path.join(temp_dir, 'live_metrics.json'),
+            status_path=os.path.join(temp_dir, 'live_packet.json'),
+        )
+        state_store = LiveStateStore()
+        pipeline = RealtimeAnalysisPipeline(
+            config=config,
+            state_store=state_store,
+            player_detector=player_detector,
+            ball_detector=StaticBallDetector(),
+            court_detector=StaticCourtDetector(),
+        )
+
+        overlay_first = pipeline.process_frame(type('Frame', (), {'frame_id': 1, 'pts': 0.00, 'image': frame})(), queue_size=0)
+        overlay_second = pipeline.process_frame(type('Frame', (), {'frame_id': 2, 'pts': 0.08, 'image': frame})(), queue_size=0)
+        overlay_third = pipeline.process_frame(type('Frame', (), {'frame_id': 3, 'pts': 0.20, 'image': frame})(), queue_size=0)
+        overlay_fourth = pipeline.process_frame(type('Frame', (), {'frame_id': 4, 'pts': 0.28, 'image': frame})(), queue_size=0)
+
+        self.assertEqual(len(overlay_first.player_boxes), 2)
+        self.assertEqual(len(overlay_second.player_boxes), 2)
+        self.assertEqual(overlay_third.player_boxes, {})
+        self.assertEqual(overlay_fourth.player_boxes, {})
+
+    def test_analysis_pipeline_exposes_shot_event(self):
+        temp_dir = tempfile.mkdtemp(prefix='tennis_pipeline_shot_event_test_')
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        config = PipelineConfig(
+            analysis_fps=25.0,
+            output_fps=25.0,
+            metrics_path=os.path.join(temp_dir, 'live_metrics.json'),
+            status_path=os.path.join(temp_dir, 'live_packet.json'),
+        )
+        state_store = LiveStateStore()
+        pipeline = RealtimeAnalysisPipeline(
+            config=config,
+            state_store=state_store,
+            player_detector=StaticPlayerDetector(),
+            ball_detector=StaticBallDetector(),
+            court_detector=StaticCourtDetector(),
+        )
+
+        overlays = []
+        for frame_id in range(1, 5):
+            overlays.append(
+                pipeline.process_frame(
+                    type('Frame', (), {'frame_id': frame_id, 'pts': frame_id / 25.0, 'image': frame})(),
+                    queue_size=0,
+                )
+            )
+
+        shot_overlays = [overlay for overlay in overlays if overlay.shot_event is not None]
+        self.assertTrue(shot_overlays)
+        self.assertEqual(shot_overlays[0].shot_event['event_type'], 'shot')
+        self.assertIn('speed_kmh', shot_overlays[0].shot_event)
 
 
 class DemoServerTests(unittest.TestCase):

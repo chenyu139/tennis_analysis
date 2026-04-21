@@ -8,6 +8,7 @@ class PipelineConfig:
     output_fps: float = 25.0
     court_refresh_seconds: float = 1.0
     player_detect_every_n_frames: int = 2
+    player_stale_seconds: float = 0.3
     render_stats: bool = True
     render_mini_court: bool = True
     render_court_keypoints: bool = False

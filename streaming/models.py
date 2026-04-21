@@ -36,6 +36,7 @@ class OverlayState:
     player_boxes: dict[int, list[float]] = field(default_factory=dict)
     ball_box: list[float] | None = None
     ball_trail: list[list[float]] = field(default_factory=list)
+    shot_event: dict[str, Any] | None = None
     court_keypoints: list[float] = field(default_factory=list)
     player_mini_court: dict[int, tuple[int, int]] = field(default_factory=dict)
     ball_mini_court: dict[int, tuple[int, int]] = field(default_factory=dict)
@@ -103,6 +104,7 @@ class TransportPacket:
     player_boxes: dict[str, list[float]] = field(default_factory=dict)
     ball_box: list[float] | None = None
     ball_trail: list[list[float]] = field(default_factory=list)
+    shot_event: dict[str, Any] | None = None
     court_keypoints: list[float] = field(default_factory=list)
     player_mini_court: dict[str, tuple[int, int]] = field(default_factory=dict)
     ball_mini_court: dict[str, tuple[int, int]] = field(default_factory=dict)
@@ -119,6 +121,7 @@ class TransportPacket:
             'player_boxes': to_json_safe(self.player_boxes),
             'ball_box': to_json_safe(self.ball_box),
             'ball_trail': to_json_safe(self.ball_trail),
+            'shot_event': to_json_safe(self.shot_event),
             'court_keypoints': to_json_safe(self.court_keypoints),
             'player_mini_court': to_json_safe(self.player_mini_court),
             'ball_mini_court': to_json_safe(self.ball_mini_court),

@@ -113,6 +113,8 @@ class RealtimeAnalysisPipeline:
                     player_boxes = self._select_players_for_tennis(raw_player_boxes, court_keypoints, video_frame.image.shape) or {}
                     if player_boxes:
                         self.cached_player_boxes = {track_id: list(bbox) for track_id, bbox in player_boxes.items()}
+                    else:
+                        self.cached_player_boxes = {}
                 else:
                     player_boxes = {track_id: list(bbox) for track_id, bbox in self.cached_player_boxes.items()}
                 debug['player_reused'] = not should_refresh_players
@@ -131,7 +133,11 @@ class RealtimeAnalysisPipeline:
             debug['ball_error'] = str(exc)
         debug['ball_ms'] = round((time.perf_counter() - ball_started) * 1000.0, 2)
 
-        normalized_players = self.player_state.update(player_boxes)
+        normalized_players = self.player_state.update(
+            player_boxes,
+            pts=video_frame.pts,
+            stale_seconds=float(getattr(self.config, 'player_stale_seconds', 0.3)),
+        )
         ball_box, shot_event, ball_trail = self.ball_history.update(video_frame.pts, ball_box)
         player_mini_court, ball_mini_court = self.projector.project(normalized_players, ball_box, court_keypoints)
 
@@ -157,6 +163,7 @@ class RealtimeAnalysisPipeline:
             player_boxes=normalized_players,
             ball_box=ball_box,
             ball_trail=ball_trail,
+            shot_event=self._serialize_shot_event(shot_event),
             court_keypoints=court_keypoints,
             player_mini_court=player_mini_court,
             ball_mini_court=ball_mini_court,
@@ -165,6 +172,7 @@ class RealtimeAnalysisPipeline:
             debug={
                 'processing_ms': round(processing_ms, 2),
                 'selected_players': len(player_boxes),
+                'normalized_players': len(normalized_players),
                 'court_points': len(court_keypoints) // 2,
                 **debug,
             },
@@ -291,7 +299,7 @@ class RealtimeAnalysisPipeline:
         overlap_area = overlap_width * overlap_height
         return overlap_area / max(self._bbox_area(bbox), 1.0)
 
-    def _classify_player_zone(self, bbox, court_keypoints, frame_width: int, frame_height: int):
+    def _classify_player_zone(self, bbox, court_keypoints, _frame_width: int, frame_height: int):
         foot_y = get_foot_position(bbox)[1]
         if not court_keypoints:
             center_y = frame_height / 2.0
@@ -317,3 +325,13 @@ class RealtimeAnalysisPipeline:
         if ball_position is None or not player_mini_court:
             return None
         return min(player_mini_court, key=lambda player_id: measure_distance(player_mini_court[player_id], ball_position))
+
+    def _serialize_shot_event(self, shot_event):
+        if shot_event is None:
+            return None
+        return {
+            'pts': round(float(shot_event.pts), 6),
+            'player_id': shot_event.player_id,
+            'speed_kmh': round(float(shot_event.speed_kmh), 2),
+            'event_type': shot_event.event_type,
+        }
