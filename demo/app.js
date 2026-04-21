@@ -396,6 +396,73 @@ function drawShotBurst(ctx, effect, boost) {
   ctx.restore();
 }
 
+function formatMetric(value, unit, digits = 1) {
+  const numeric = Number(value || 0);
+  return `${numeric.toFixed(digits)} ${unit}`;
+}
+
+function drawStatsPanel(ctx, canvas, stats) {
+  if (!stats || !Object.keys(stats).length) {
+    return;
+  }
+  const panelWidth = Math.min(420, canvas.width * 0.28);
+  const rowHeight = 30;
+  const panelHeight = 196;
+  const startX = canvas.width - panelWidth - 18;
+  const startY = canvas.height - panelHeight - 18;
+  const rows = [
+    ['击球数', `${Math.round(Number(stats.player_1_number_of_shots || 0))}`, `${Math.round(Number(stats.player_2_number_of_shots || 0))}`],
+    ['跑动距离', formatMetric(stats.player_1_total_distance_run, 'm'), formatMetric(stats.player_2_total_distance_run, 'm')],
+    ['卡路里', formatMetric(stats.player_1_total_calories_burned, 'kcal'), formatMetric(stats.player_2_total_calories_burned, 'kcal')],
+    ['瞬时跑速', formatMetric(stats.player_1_last_player_speed, 'km/h'), formatMetric(stats.player_2_last_player_speed, 'km/h')],
+    ['击球时速', formatMetric(stats.player_1_last_shot_speed, 'km/h'), formatMetric(stats.player_2_last_shot_speed, 'km/h')],
+  ];
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(6, 12, 24, 0.62)';
+  ctx.strokeStyle = 'rgba(139, 208, 255, 0.28)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.roundRect(startX, startY, panelWidth, panelHeight, 16);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 18px Arial';
+  ctx.fillText('实时球员数据', startX + 16, startY + 28);
+
+  const labelX = startX + 18;
+  const p1X = startX + panelWidth * 0.54;
+  const p2X = startX + panelWidth * 0.79;
+  ctx.font = 'bold 14px Arial';
+  ctx.fillStyle = '#ffd86b';
+  ctx.fillText('P1', p1X, startY + 54);
+  ctx.fillStyle = '#8ad6ff';
+  ctx.fillText('P2', p2X, startY + 54);
+
+  rows.forEach((row, index) => {
+    const top = startY + 62 + index * rowHeight;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
+    ctx.beginPath();
+    ctx.moveTo(startX + 14, top);
+    ctx.lineTo(startX + panelWidth - 14, top);
+    ctx.stroke();
+
+    ctx.font = '13px Arial';
+    ctx.fillStyle = '#dce7f6';
+    ctx.fillText(row[0], labelX, top + 20);
+    ctx.fillStyle = '#ffd86b';
+    ctx.fillText(row[1], p1X - 6, top + 20);
+    ctx.fillStyle = '#8ad6ff';
+    ctx.fillText(row[2], p2X - 6, top + 20);
+  });
+
+  ctx.font = '12px Arial';
+  ctx.fillStyle = '#9bd0ff';
+  ctx.fillText(`球速 ${formatMetric(stats.ball_speed_kmh, 'km/h')}`, startX + 16, startY + panelHeight - 12);
+  ctx.restore();
+}
+
 function rememberWsMetadata(metadata) {
   if (!metadata || metadata.frame_id === undefined) {
     return;
@@ -483,14 +550,7 @@ function drawOverlay(ctx, canvas, metadata) {
 
   const stats = metadata.stats_row || {};
   if (Object.keys(stats).length) {
-    const statsText = Object.entries(stats)
-      .slice(0, 3)
-      .map(([key, value]) => `${key}=${typeof value === 'number' ? value.toFixed(1) : value}`)
-      .join(' | ');
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-    ctx.fillRect(12, canvas.height - 42, Math.max(320, statsText.length * 8), 30);
-    ctx.fillStyle = '#9bd0ff';
-    ctx.fillText(statsText, 18, canvas.height - 20);
+    drawStatsPanel(ctx, canvas, stats);
   }
 }
 

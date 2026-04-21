@@ -96,6 +96,17 @@ class SequencePlayerDetector:
         return self.detections[index]
 
 
+class OffsetTopBottomPlayerDetector:
+    def detect(self, image):
+        del image
+        return {
+            10: [80, 18, 136, 94],
+            20: [196, 146, 252, 228],
+            30: [18, 92, 56, 202],
+            40: [270, 84, 316, 198],
+        }
+
+
 class ProductionLiveStreamServiceTests(unittest.TestCase):
     def _build_service(self, frame_count=18, queue_size=32):
         temp_dir = tempfile.mkdtemp(prefix='tennis_prod_test_')
@@ -163,6 +174,7 @@ class ProductionLiveStreamServiceTests(unittest.TestCase):
         self.assertIn('player_boxes', packet.metadata)
         self.assertIn('ball_box', packet.metadata)
         self.assertIn('ball_trail', packet.metadata)
+        self.assertIn('stats_row', packet.metadata)
         self.assertGreaterEqual(len(packet.metadata['ball_trail']), 2)
         self.assertTrue(packet.annexb_bytes.startswith(b'\x00\x00'))
         self.assertEqual(extract_sei_messages(packet.annexb_bytes)[0]['frame_id'], packet.frame_id)
@@ -244,6 +256,31 @@ class ProductionLiveStreamServiceTests(unittest.TestCase):
         self.assertIn([142, 144, 206, 228], selected_boxes)
         xs = [((box[0] + box[2]) / 2) for box in selected_boxes]
         self.assertTrue(all(120 <= x <= 220 for x in xs))
+
+    def test_analysis_pipeline_keeps_offset_top_bottom_players(self):
+        temp_dir = tempfile.mkdtemp(prefix='tennis_pipeline_offset_player_test_')
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        config = PipelineConfig(
+            analysis_fps=25.0,
+            output_fps=25.0,
+            metrics_path=os.path.join(temp_dir, 'live_metrics.json'),
+            status_path=os.path.join(temp_dir, 'live_packet.json'),
+        )
+        state_store = LiveStateStore()
+        pipeline = RealtimeAnalysisPipeline(
+            config=config,
+            state_store=state_store,
+            player_detector=OffsetTopBottomPlayerDetector(),
+            ball_detector=StaticBallDetector(),
+            court_detector=StaticCourtDetector(),
+        )
+
+        overlay = pipeline.process_frame(type('Frame', (), {'frame_id': 1, 'pts': 0.04, 'image': frame})(), queue_size=0)
+
+        selected_boxes = list(overlay.player_boxes.values())
+        self.assertEqual(len(selected_boxes), 2)
+        self.assertIn([80, 18, 136, 94], selected_boxes)
+        self.assertIn([196, 146, 252, 228], selected_boxes)
 
     def test_analysis_pipeline_exposes_ball_trail(self):
         temp_dir = tempfile.mkdtemp(prefix='tennis_pipeline_ball_trail_test_')

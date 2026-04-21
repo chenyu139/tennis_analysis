@@ -246,15 +246,15 @@ class RealtimeAnalysisPipeline:
         if not court_keypoints:
             center_x = frame_width / 2.0
             center_y = frame_height / 2.0
-            center_gate = max(frame_width * 0.22, 28.0)
-            if abs(foot_x - center_x) > center_gate:
+            center_gate = max(frame_width * 0.34, 40.0)
+            if abs(foot_x - center_x) > center_gate * 1.35:
                 return None
-            vertical_deadband = max(frame_height * 0.08, 16.0)
+            vertical_deadband = max(frame_height * 0.06, 14.0)
             if abs(foot_y - center_y) < vertical_deadband:
                 return None
             center_bias = 1.0 - min(abs(foot_x - center_x) / center_gate, 1.0)
             baseline_bias = min(abs(foot_y - center_y) / max(frame_height / 2.0, 1.0), 1.0)
-            return area_score * 0.3 + center_bias * 0.45 + baseline_bias * 0.25
+            return area_score * 0.25 + center_bias * 0.35 + baseline_bias * 0.4
 
         xs = court_keypoints[0::2]
         ys = court_keypoints[1::2]
@@ -262,25 +262,26 @@ class RealtimeAnalysisPipeline:
         right = max(xs)
         top = min(ys)
         bottom = max(ys)
-        expand_x = max((right - left) * 0.08, 12.0)
-        expand_y = max((bottom - top) * 0.12, 12.0)
+        expand_x = max((right - left) * 0.14, 22.0)
+        expand_y = max((bottom - top) * 0.16, 18.0)
         if not (left - expand_x <= foot_x <= right + expand_x and top - expand_y <= foot_y <= bottom + expand_y):
             return None
         overlap_ratio = self._overlap_ratio(bbox, left - expand_x, top - expand_y, right + expand_x, bottom + expand_y)
-        if overlap_ratio < 0.55:
+        if overlap_ratio < 0.25:
             return None
 
         center_x = (left + right) / 2.0
         center_y = (top + bottom) / 2.0
-        center_gate = max((right - left) * 0.24, 26.0)
-        if abs(foot_x - center_x) > center_gate:
+        center_gate = max((right - left) * 0.34, 44.0)
+        lateral_distance = abs(foot_x - center_x)
+        if lateral_distance > center_gate * 1.3:
             return None
-        vertical_deadband = max((bottom - top) * 0.1, 18.0)
+        vertical_deadband = max((bottom - top) * 0.06, 14.0)
         if abs(foot_y - center_y) < vertical_deadband:
             return None
-        center_bias = 1.0 - min(abs(foot_x - center_x) / max((right - left) / 2.0, 1.0), 1.0)
+        center_bias = 1.0 - min(lateral_distance / center_gate, 1.0)
         baseline_bias = min(abs(foot_y - center_y) / max((bottom - top) / 2.0, 1.0), 1.0)
-        return area_score * 0.1 + overlap_ratio * 0.35 + center_bias * 0.35 + baseline_bias * 0.2
+        return area_score * 0.15 + overlap_ratio * 0.25 + center_bias * 0.2 + baseline_bias * 0.4
 
     def _player_priority(self, item):
         _track_id, bbox, score = item
@@ -303,11 +304,11 @@ class RealtimeAnalysisPipeline:
         foot_y = get_foot_position(bbox)[1]
         if not court_keypoints:
             center_y = frame_height / 2.0
-            deadband = max(frame_height * 0.08, 16.0)
+            deadband = max(frame_height * 0.06, 14.0)
         else:
             ys = court_keypoints[1::2]
             center_y = (min(ys) + max(ys)) / 2.0
-            deadband = max((max(ys) - min(ys)) * 0.1, 18.0)
+            deadband = max((max(ys) - min(ys)) * 0.06, 14.0)
         if foot_y <= center_y - deadband:
             return 'top'
         if foot_y >= center_y + deadband:
