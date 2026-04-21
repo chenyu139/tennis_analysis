@@ -6,9 +6,19 @@ sys.path.append('../')
 from utils import measure_distance, get_center_of_bbox, get_foot_position
 
 class PlayerTracker:
-    def __init__(self,model_path):
+    def __init__(self,model_path, device=None):
         self.model_path = model_path
         self.model = None
+        self.device = device
+
+    def _ensure_model(self):
+        if self.model is None:
+            self.model = YOLO(self.model_path)
+            if self.device is not None:
+                try:
+                    self.model.to(self.device)
+                except Exception:
+                    pass
 
     def choose_and_filter_players(self, court_keypoints, player_detections):
         player_detections_first_frame = player_detections[0]
@@ -55,8 +65,7 @@ class PlayerTracker:
                 player_detections = pickle.load(f)
             return player_detections
 
-        if self.model is None:
-            self.model = YOLO(self.model_path)
+        self._ensure_model()
 
         for frame in frames:
             player_dict = self.detect_frame(frame)
@@ -69,9 +78,11 @@ class PlayerTracker:
         return player_detections
 
     def detect_frame(self,frame):
-        if self.model is None:
-            self.model = YOLO(self.model_path)  # FIX: 流式逐帧检测直接调用 detect_frame 时确保模型已初始化
-        results = self.model.track(frame, persist=True)[0]
+        self._ensure_model()
+        track_kwargs = {'persist': True}
+        if self.device is not None:
+            track_kwargs['device'] = self.device
+        results = self.model.track(frame, **track_kwargs)[0]
         id_name_dict = results.names
 
         player_dict = {}

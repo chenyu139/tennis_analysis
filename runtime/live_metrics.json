@@ -1,0 +1,15 @@
+{
+  "frames_in": 8124,
+  "frames_processed": 2947,
+  "frames_out": 2947,
+  "frames_dropped": 5168,
+  "analysis_runs": 2527,
+  "analysis_skips": 420,
+  "queue_max_size": 8,
+  "last_processing_ms": 75.45,
+  "avg_processing_ms": 64.88,
+  "uptime_seconds": 268.06,
+  "output_fps": 10.43,
+  "status": "starting",
+  "last_error": ""
+}

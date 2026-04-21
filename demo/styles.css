@@ -1,0 +1,134 @@
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #0b1220;
+  color: #f3f6fb;
+}
+.page {
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 18px 20px 28px;
+}
+header h1 {
+  margin: 0 0 8px;
+  font-size: 32px;
+}
+header p {
+  margin: 0 0 24px;
+  color: #c2cfdf;
+  font-size: 16px;
+}
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(320px, 1.2fr);
+  gap: 20px;
+  align-items: start;
+}
+.panel {
+  background: #121b2c;
+  border: 1px solid #25324a;
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+.video-panel {
+  grid-row: span 3;
+}
+.panel-title {
+  font-size: 20px;
+  font-weight: bold;
+  margin-bottom: 12px;
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.panel-subtitle {
+  color: #89a3c7;
+  font-size: 13px;
+}
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.controls label {
+  color: #89a3c7;
+  font-size: 14px;
+}
+.controls select {
+  background: #0b1220;
+  color: #f3f6fb;
+  border: 1px solid #334562;
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+.video-shell {
+  background: #050a14;
+  border-radius: 14px;
+  overflow: hidden;
+  min-height: 40vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.video-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.stream-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.stream-title {
+  color: #dce7f6;
+  font-size: 16px;
+  font-weight: bold;
+}
+#raw-canvas,
+#overlay-canvas {
+  width: 100%;
+  height: min(48vh, 560px);
+  display: block;
+  background: #050a14;
+}
+.kv {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+}
+.kv .key {
+  color: #89a3c7;
+}
+.kv .value {
+  text-align: right;
+  font-weight: bold;
+}
+.tips ul {
+  margin: 0;
+  padding-left: 20px;
+  color: #d9e3f0;
+}
+@media (max-width: 1100px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  .video-panel {
+    grid-row: auto;
+  }
+  .video-shell {
+    min-height: 48vh;
+  }
+  .video-grid {
+    grid-template-columns: 1fr;
+  }
+  #raw-canvas,
+  #overlay-canvas {
+    height: min(62vh, 720px);
+  }
+}

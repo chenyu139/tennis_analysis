@@ -5,9 +5,19 @@ import pandas as pd
 import numpy as np
 
 class BallTracker:
-    def __init__(self,model_path):
+    def __init__(self,model_path, device=None):
         self.model_path = model_path
         self.model = None
+        self.device = device
+
+    def _ensure_model(self):
+        if self.model is None:
+            self.model = YOLO(self.model_path)
+            if self.device is not None:
+                try:
+                    self.model.to(self.device)
+                except Exception:
+                    pass
 
     def interpolate_ball_positions(self, ball_positions):
         ball_positions = [x.get(1,[]) for x in ball_positions]
@@ -73,8 +83,7 @@ class BallTracker:
                 ball_detections = pickle.load(f)
             return ball_detections
 
-        if self.model is None:
-            self.model = YOLO(self.model_path)
+        self._ensure_model()
 
         for frame in frames:
             player_dict = self.detect_frame(frame)
@@ -87,9 +96,11 @@ class BallTracker:
         return ball_detections
 
     def detect_frame(self,frame):
-        if self.model is None:
-            self.model = YOLO(self.model_path)  # FIX: 流式逐帧检测直接调用 detect_frame 时确保模型已初始化
-        results = self.model.predict(frame,conf=0.15)[0]
+        self._ensure_model()
+        predict_kwargs = {'conf': 0.15}
+        if self.device is not None:
+            predict_kwargs['device'] = self.device
+        results = self.model.predict(frame, **predict_kwargs)[0]
 
         ball_dict = {}
         for box in results.boxes:

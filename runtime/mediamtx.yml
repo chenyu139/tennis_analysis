@@ -1,0 +1,17 @@
+logLevel: info
+api: true
+apiAddress: 127.0.0.1:9997
+metrics: true
+metricsAddress: 127.0.0.1:9998
+pprof: false
+rtsp: false
+hls: false
+webrtc: false
+srt: false
+rtmp: true
+rtmpAddress: 127.0.0.1:1935
+paths:
+  live/source:
+    source: publisher
+  live/analysis:
+    source: publisher

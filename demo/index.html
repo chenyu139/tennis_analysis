@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tennis Live Analysis Demo</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="page">
+    <header>
+      <h1>网球直播分析演示</h1>
+      <p>服务端输出原始视频流与检测元数据。演示端按运行配置启用 SEI 或 WebSocket 叠框模式。</p>
+    </header>
+    <main class="grid">
+      <section class="panel video-panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">双路直播画面</div>
+            <div class="panel-subtitle">左侧为原始流，右侧为分析流叠框结果，页面按服务端配置自动启用 SEI 或 WebSocket 叠框</div>
+          </div>
+          <div class="controls">
+            <label for="mode-select">模式</label>
+            <select id="mode-select">
+              <option value="sei">SEI 解析叠框</option>
+              <option value="websocket">WebSocket 叠框</option>
+            </select>
+          </div>
+        </div>
+        <div class="video-grid">
+          <div class="stream-card">
+            <div class="stream-title">原始视频流</div>
+            <div class="video-shell">
+              <canvas id="raw-canvas"></canvas>
+            </div>
+          </div>
+          <div class="stream-card">
+            <div class="stream-title">分析叠框视频流</div>
+            <div class="video-shell">
+              <canvas id="overlay-canvas"></canvas>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-title">运行状态</div>
+        <div id="overlay-status" class="kv"></div>
+      </section>
+      <section class="panel">
+        <div class="panel-title">直播指标</div>
+        <div id="metrics" class="kv"></div>
+      </section>
+      <section class="panel tips">
+        <div class="panel-title">讲解建议</div>
+        <ul>
+          <li>`sei` 模式从分析流的 H.264 SEI 中直接取出检测元数据。</li>
+          <li>`websocket` 模式通过 WebSocket 接收元数据，并按帧号与时间戳同步叠框。</li>
+          <li>页面同时展示原始流和分析流，便于现场对比识别效果、稳定性和时延。</li>
+        </ul>
+      </section>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -9,6 +9,7 @@ __pycache__
 *.mp4
 output_videos/*
 *.iml
+*.log
 .idea/
 .gradle/
 **/build/

@@ -1,0 +1,21 @@
+{
+  "frame_id": 54138,
+  "pts": 1806.4046,
+  "status": "ok",
+  "quality_level": "full",
+  "metrics": {
+    "frames_in": 54140,
+    "frames_processed": 35210,
+    "frames_out": 35210,
+    "frames_dropped": 18930,
+    "analysis_runs": 16647,
+    "analysis_skips": 18563,
+    "queue_max_size": 8,
+    "last_processing_ms": 30.47,
+    "avg_processing_ms": 35.23,
+    "uptime_seconds": 1806.79,
+    "output_fps": 23.83,
+    "status": "starting",
+    "last_error": ""
+  }
+}

@@ -1,0 +1,498 @@
+const rawCanvas = document.getElementById('raw-canvas');
+const rawCtx = rawCanvas.getContext('2d');
+const overlayCanvas = document.getElementById('overlay-canvas');
+const overlayCtx = overlayCanvas.getContext('2d');
+const modeSelect = document.getElementById('mode-select');
+const overlayRoot = document.getElementById('overlay-status');
+const metricsRoot = document.getElementById('metrics');
+
+const SEI_UUID_HEX = '7ce15f8687544f0fa4cfc9a0ab12f65b';
+
+let ws = null;
+let runtimeConfig = null;
+let activeSessionId = 0;
+let wsMetadataByFrameId = new Map();
+
+function renderPairs(root, data) {
+  root.innerHTML = '';
+  Object.entries(data).forEach(([key, value]) => {
+    const keyNode = document.createElement('div');
+    keyNode.className = 'key';
+    keyNode.textContent = key;
+    const valueNode = document.createElement('div');
+    valueNode.className = 'value';
+    valueNode.textContent = typeof value === 'object' ? JSON.stringify(value) : String(value);
+    root.appendChild(keyNode);
+    root.appendChild(valueNode);
+  });
+}
+
+function getSelectedMode() {
+  return modeSelect.value || (runtimeConfig ? runtimeConfig.overlay_mode : 'sei');
+}
+
+function configureModeOptions() {
+  const availableModes = Array.isArray(runtimeConfig.available_modes) && runtimeConfig.available_modes.length
+    ? runtimeConfig.available_modes
+    : ['sei'];
+  const labels = {
+    sei: 'SEI 解析叠框',
+    websocket: 'WebSocket 叠框',
+  };
+  modeSelect.innerHTML = '';
+  availableModes.forEach((mode) => {
+    const option = document.createElement('option');
+    option.value = mode;
+    option.textContent = labels[mode] || mode;
+    modeSelect.appendChild(option);
+  });
+  modeSelect.value = runtimeConfig.overlay_mode || availableModes[0];
+  modeSelect.disabled = availableModes.length <= 1;
+}
+
+function concatArrays(chunks) {
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const merged = new Uint8Array(totalLength);
+  let offset = 0;
+  chunks.forEach((chunk) => {
+    merged.set(chunk, offset);
+    offset += chunk.length;
+  });
+  return merged;
+}
+
+function hexByte(value) {
+  return value.toString(16).padStart(2, '0').toUpperCase();
+}
+
+function findStartCode(buffer, startIndex = 0) {
+  for (let index = startIndex; index < buffer.length - 3; index += 1) {
+    if (buffer[index] === 0x00 && buffer[index + 1] === 0x00 && buffer[index + 2] === 0x01) {
+      return { index, length: 3 };
+    }
+    if (
+      index < buffer.length - 4 &&
+      buffer[index] === 0x00 &&
+      buffer[index + 1] === 0x00 &&
+      buffer[index + 2] === 0x00 &&
+      buffer[index + 3] === 0x01
+    ) {
+      return { index, length: 4 };
+    }
+  }
+  return null;
+}
+
+function removeEmulationPrevention(data) {
+  const output = [];
+  for (let index = 0; index < data.length; index += 1) {
+    if (
+      index + 2 < data.length &&
+      data[index] === 0x00 &&
+      data[index + 1] === 0x00 &&
+      data[index + 2] === 0x03
+    ) {
+      output.push(0x00, 0x00);
+      index += 2;
+      continue;
+    }
+    output.push(data[index]);
+  }
+  return new Uint8Array(output);
+}
+
+function getNalType(nalUnit) {
+  const startCode = nalUnit[2] === 0x01 ? 3 : 4;
+  return nalUnit[startCode] & 0x1F;
+}
+
+function extractSeiMetadata(nalUnit) {
+  const startCode = nalUnit[2] === 0x01 ? 3 : 4;
+  const rbsp = removeEmulationPrevention(nalUnit.slice(startCode + 1));
+  let cursor = 0;
+  while (cursor + 2 <= rbsp.length) {
+    let payloadType = 0;
+    while (cursor < rbsp.length && rbsp[cursor] === 0xFF) {
+      payloadType += 0xFF;
+      cursor += 1;
+    }
+    if (cursor >= rbsp.length) {
+      break;
+    }
+    payloadType += rbsp[cursor];
+    cursor += 1;
+
+    let payloadSize = 0;
+    while (cursor < rbsp.length && rbsp[cursor] === 0xFF) {
+      payloadSize += 0xFF;
+      cursor += 1;
+    }
+    if (cursor >= rbsp.length) {
+      break;
+    }
+    payloadSize += rbsp[cursor];
+    cursor += 1;
+    const payload = rbsp.slice(cursor, cursor + payloadSize);
+    cursor += payloadSize;
+    if (payloadType === 5 && payload.length > 16) {
+      const uuidHex = [...payload.slice(0, 16)].map((value) => value.toString(16).padStart(2, '0')).join('');
+      if (uuidHex === SEI_UUID_HEX) {
+        const text = new TextDecoder().decode(payload.slice(16));
+        return JSON.parse(text);
+      }
+    }
+    if (cursor < rbsp.length && rbsp[cursor] === 0x80) {
+      break;
+    }
+  }
+  return null;
+}
+
+function getCodecFromSps(nalUnit) {
+  const startCode = nalUnit[2] === 0x01 ? 3 : 4;
+  const profile = nalUnit[startCode + 1];
+  const constraints = nalUnit[startCode + 2];
+  const level = nalUnit[startCode + 3];
+  return `avc1.${hexByte(profile)}${hexByte(constraints)}${hexByte(level)}`;
+}
+
+function normalizeBox(box) {
+  return Array.isArray(box) && box.length === 4 ? box.map((value) => Number(value)) : null;
+}
+
+function rememberWsMetadata(metadata) {
+  if (!metadata || metadata.frame_id === undefined) {
+    return;
+  }
+  wsMetadataByFrameId.set(Number(metadata.frame_id), metadata);
+  const keys = [...wsMetadataByFrameId.keys()].sort((a, b) => a - b);
+  while (keys.length > 160) {
+    wsMetadataByFrameId.delete(keys.shift());
+  }
+}
+
+function findWsMetadata(streamMetadata, fallbackTimestampUs) {
+  if (streamMetadata && wsMetadataByFrameId.has(Number(streamMetadata.frame_id))) {
+    return wsMetadataByFrameId.get(Number(streamMetadata.frame_id));
+  }
+  const pts = streamMetadata ? Number(streamMetadata.pts || 0) : fallbackTimestampUs / 1_000_000;
+  let candidate = null;
+  let minDistance = Number.POSITIVE_INFINITY;
+  wsMetadataByFrameId.forEach((metadata) => {
+    const distance = Math.abs(Number(metadata.pts || 0) - pts);
+    if (distance < minDistance) {
+      minDistance = distance;
+      candidate = metadata;
+    }
+  });
+  return minDistance <= 0.2 ? candidate : null;
+}
+
+function drawOverlay(ctx, canvas, metadata) {
+  if (!metadata) {
+    return;
+  }
+
+  const playerBoxes = metadata.player_boxes || {};
+  Object.entries(playerBoxes).forEach(([playerId, box]) => {
+    const normalized = normalizeBox(box);
+    if (!normalized) {
+      return;
+    }
+    const [x1, y1, x2, y2] = normalized;
+    const footX = (x1 + x2) / 2;
+    const footY = y2;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.ellipse(footX, footY, Math.max((x2 - x1) * 0.35, 18), Math.max((x2 - x1) * 0.12, 8), 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '20px Arial';
+    ctx.fillText(`P${playerId}`, x1, Math.max(y1 - 10, 24));
+  });
+
+  const ballBox = normalizeBox(metadata.ball_box);
+  if (ballBox) {
+    const [x1, y1, x2, y2] = ballBox;
+    const centerX = (x1 + x2) / 2;
+    const centerY = (y1 + y2) / 2;
+    const radius = Math.max((x2 - x1) / 2, 6);
+    ctx.fillStyle = 'rgba(255, 140, 0, 0.35)';
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius + 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffde59';
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const statusText = `frame=${metadata.frame_id} pts=${Number(metadata.pts || 0).toFixed(3)} status=${metadata.status || 'idle'} mode=${getSelectedMode()}`;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+  ctx.fillRect(12, 12, Math.max(420, statusText.length * 9), 34);
+  ctx.fillStyle = '#00ff7f';
+  ctx.font = '18px Arial';
+  ctx.fillText(statusText, 18, 35);
+
+  const stats = metadata.stats_row || {};
+  if (Object.keys(stats).length) {
+    const statsText = Object.entries(stats)
+      .slice(0, 3)
+      .map(([key, value]) => `${key}=${typeof value === 'number' ? value.toFixed(1) : value}`)
+      .join(' | ');
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.fillRect(12, canvas.height - 42, Math.max(320, statsText.length * 8), 30);
+    ctx.fillStyle = '#9bd0ff';
+    ctx.fillText(statsText, 18, canvas.height - 20);
+  }
+}
+
+class StreamPlayer {
+  constructor(canvas, ctx, streamUrl, onFrame, defaultFps = 25) {
+    this.canvas = canvas;
+    this.ctx = ctx;
+    this.streamUrl = streamUrl;
+    this.onFrame = onFrame;
+    this.defaultFps = defaultFps;
+    this.decoder = null;
+    this.decoderConfigured = false;
+    this.streamMetadataByTimestamp = new Map();
+    this.annexbBuffer = new Uint8Array(0);
+    this.currentAccessUnit = [];
+    this.syntheticTimestampUs = 0;
+  }
+
+  reset() {
+    if (this.decoder) {
+      this.decoder.close();
+    }
+    this.decoder = new VideoDecoder({
+      output: (frame) => this.handleDecodedFrame(frame),
+      error: (error) => console.error('VideoDecoder error:', error),
+    });
+    this.decoderConfigured = false;
+    this.streamMetadataByTimestamp = new Map();
+    this.annexbBuffer = new Uint8Array(0);
+    this.currentAccessUnit = [];
+    this.syntheticTimestampUs = 0;
+  }
+
+  configureDecoderIfNeeded(codec) {
+    if (this.decoderConfigured) {
+      return;
+    }
+    this.decoder.configure({
+      codec,
+      optimizeForLatency: true,
+      hardwareAcceleration: 'prefer-hardware',
+    });
+    this.decoderConfigured = true;
+  }
+
+  extractNals() {
+    const nals = [];
+    while (true) {
+      const first = findStartCode(this.annexbBuffer, 0);
+      if (!first) {
+        this.annexbBuffer = new Uint8Array(0);
+        break;
+      }
+      if (first.index > 0) {
+        this.annexbBuffer = this.annexbBuffer.slice(first.index);
+        continue;
+      }
+      const second = findStartCode(this.annexbBuffer, first.length);
+      if (!second) {
+        break;
+      }
+      nals.push(this.annexbBuffer.slice(0, second.index));
+      this.annexbBuffer = this.annexbBuffer.slice(second.index);
+    }
+    return nals;
+  }
+
+  async flushAccessUnit(nalUnits) {
+    if (!nalUnits.length) {
+      return;
+    }
+    let metadata = null;
+    let codec = null;
+    let isKey = false;
+    nalUnits.forEach((nalUnit) => {
+      const nalType = getNalType(nalUnit);
+      if (nalType === 7 && !codec) {
+        codec = getCodecFromSps(nalUnit);
+      }
+      if (nalType === 6 && !metadata) {
+        metadata = extractSeiMetadata(nalUnit);
+      }
+      if (nalType === 5) {
+        isKey = true;
+      }
+    });
+    if (!codec && !this.decoderConfigured) {
+      return;
+    }
+    if (codec) {
+      this.configureDecoderIfNeeded(codec);
+    }
+    if (!this.decoderConfigured) {
+      return;
+    }
+    const timestamp = metadata
+      ? Math.round(Number(metadata.pts || 0) * 1_000_000)
+      : this.syntheticTimestampUs;
+    this.syntheticTimestampUs = timestamp + Math.round(1_000_000 / Math.max(this.defaultFps, 1));
+    this.streamMetadataByTimestamp.set(timestamp, metadata);
+    const chunkData = concatArrays(nalUnits);
+    this.decoder.decode(new EncodedVideoChunk({
+      type: isKey ? 'key' : 'delta',
+      timestamp,
+      data: chunkData,
+    }));
+  }
+
+  handleDecodedFrame(frame) {
+    if (this.canvas.width !== frame.displayWidth || this.canvas.height !== frame.displayHeight) {
+      this.canvas.width = frame.displayWidth;
+      this.canvas.height = frame.displayHeight;
+    }
+    this.ctx.drawImage(frame, 0, 0, this.canvas.width, this.canvas.height);
+    const metadata = this.streamMetadataByTimestamp.get(frame.timestamp) || null;
+    this.onFrame(frame, metadata, frame.timestamp);
+    frame.close();
+  }
+
+  async consume(sessionId) {
+    const response = await fetch(this.streamUrl, { cache: 'no-store' });
+    if (!response.ok || !response.body) {
+      throw new Error(`stream request failed: ${response.status}`);
+    }
+    const reader = response.body.getReader();
+    while (sessionId === activeSessionId) {
+      const { value, done } = await reader.read();
+      if (done) {
+        if (this.currentAccessUnit.length) {
+          await this.flushAccessUnit(this.currentAccessUnit);
+          this.currentAccessUnit = [];
+        }
+        break;
+      }
+      this.annexbBuffer = concatArrays([this.annexbBuffer, value]);
+      const nalUnits = this.extractNals();
+      for (const nalUnit of nalUnits) {
+        const nalType = getNalType(nalUnit);
+        if (nalType === 9 && this.currentAccessUnit.length) {
+          await this.flushAccessUnit(this.currentAccessUnit);
+          this.currentAccessUnit = [];
+        }
+        this.currentAccessUnit.push(nalUnit);
+      }
+    }
+  }
+}
+
+function stopWebSocket() {
+  if (ws) {
+    ws.close();
+    ws = null;
+  }
+}
+
+function connectWebSocket(sessionId) {
+  if (!runtimeConfig.ws_url) {
+    renderPairs(overlayRoot, { error: '当前实例未启用 WebSocket 模式' });
+    return;
+  }
+  stopWebSocket();
+  ws = new WebSocket(runtimeConfig.ws_url);
+  ws.onmessage = (event) => {
+    if (sessionId !== activeSessionId) {
+      return;
+    }
+    const payload = JSON.parse(event.data);
+    if (payload.type === 'heartbeat') {
+      return;
+    }
+    rememberWsMetadata(payload);
+  };
+}
+
+async function refreshPanels() {
+  const metricsResp = await fetch('/api/metrics', { cache: 'no-store' });
+  const overlayResp = await fetch('/api/overlay', { cache: 'no-store' });
+  const runtimeResp = await fetch('/api/runtime', { cache: 'no-store' });
+  const metrics = await metricsResp.json();
+  const overlay = await overlayResp.json();
+  const runtime = await runtimeResp.json();
+  renderPairs(metricsRoot, metrics);
+  renderPairs(overlayRoot, {
+    ...overlay,
+    source_rtmp: runtime.source_rtmp_url || 'n/a',
+    analysis_rtmp: runtime.analysis_rtmp_url || 'n/a',
+  });
+}
+
+async function loadRuntimeConfig() {
+  const response = await fetch('/api/runtime', { cache: 'no-store' });
+  runtimeConfig = await response.json();
+  configureModeOptions();
+}
+
+async function startPlayback() {
+  if (!('VideoDecoder' in window)) {
+    renderPairs(overlayRoot, { error: '当前浏览器不支持 WebCodecs VideoDecoder' });
+    return;
+  }
+
+  activeSessionId += 1;
+  const sessionId = activeSessionId;
+  wsMetadataByFrameId = new Map();
+  stopWebSocket();
+
+  const rawPlayer = new StreamPlayer(
+    rawCanvas,
+    rawCtx,
+    runtimeConfig.raw_stream_url,
+    () => {},
+    Number(runtimeConfig.fps || 25),
+  );
+  const overlayPlayer = new StreamPlayer(
+    overlayCanvas,
+    overlayCtx,
+    runtimeConfig.analysis_stream_url,
+    (_frame, metadata, timestamp) => {
+      const overlayMetadata = getSelectedMode() === 'websocket'
+        ? findWsMetadata(metadata, timestamp)
+        : metadata;
+      drawOverlay(overlayCtx, overlayCanvas, overlayMetadata);
+    },
+    Number(runtimeConfig.fps || 25),
+  );
+
+  rawPlayer.reset();
+  overlayPlayer.reset();
+
+  if (getSelectedMode() === 'websocket') {
+    connectWebSocket(sessionId);
+  }
+
+  rawPlayer.consume(sessionId).catch((error) => {
+    console.error(error);
+    renderPairs(overlayRoot, { error: `原始流异常: ${String(error)}` });
+  });
+
+  overlayPlayer.consume(sessionId).catch((error) => {
+    console.error(error);
+    renderPairs(overlayRoot, { error: `分析流异常: ${String(error)}` });
+  });
+}
+
+modeSelect.addEventListener('change', () => {
+  startPlayback();
+});
+
+loadRuntimeConfig().then(() => startPlayback());
+refreshPanels();
+setInterval(refreshPanels, 500);
