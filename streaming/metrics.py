@@ -49,6 +49,25 @@ class RuntimeMetricsTracker:
         self.metrics.queue_max_size = max(self.metrics.queue_max_size, queue_size)
         self._publish()
 
+    def on_stage_timings(
+        self,
+        *,
+        analysis_ms: float,
+        raw_encode_ms: float,
+        sei_inject_ms: float,
+        status_write_ms: float,
+    ) -> None:
+        count = max(self.metrics.frames_processed, 1)
+        self.metrics.last_analysis_ms = analysis_ms
+        self.metrics.avg_analysis_ms = ((self.metrics.avg_analysis_ms * (count - 1)) + analysis_ms) / count
+        self.metrics.last_raw_encode_ms = raw_encode_ms
+        self.metrics.avg_raw_encode_ms = ((self.metrics.avg_raw_encode_ms * (count - 1)) + raw_encode_ms) / count
+        self.metrics.last_sei_inject_ms = sei_inject_ms
+        self.metrics.avg_sei_inject_ms = ((self.metrics.avg_sei_inject_ms * (count - 1)) + sei_inject_ms) / count
+        self.metrics.last_status_write_ms = status_write_ms
+        self.metrics.avg_status_write_ms = ((self.metrics.avg_status_write_ms * (count - 1)) + status_write_ms) / count
+        self._publish()
+
     def on_output(self) -> None:
         now = time.perf_counter()
         self.metrics.frames_out += 1

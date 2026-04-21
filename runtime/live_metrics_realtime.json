@@ -1,0 +1,23 @@
+{
+  "frames_in": 93,
+  "frames_processed": 30,
+  "frames_out": 30,
+  "frames_dropped": 55,
+  "analysis_runs": 13,
+  "analysis_skips": 17,
+  "queue_max_size": 8,
+  "last_processing_ms": 68.17,
+  "avg_processing_ms": 98.88,
+  "last_analysis_ms": 54.17,
+  "avg_analysis_ms": 84.69,
+  "last_raw_encode_ms": 12.53,
+  "avg_raw_encode_ms": 10.95,
+  "last_sei_inject_ms": 0.96,
+  "avg_sei_inject_ms": 2.68,
+  "last_status_write_ms": 0.42,
+  "avg_status_write_ms": 0.45,
+  "uptime_seconds": 3.07,
+  "output_fps": 14.38,
+  "status": "starting",
+  "last_error": ""
+}

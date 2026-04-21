@@ -38,6 +38,17 @@ class StaticCourtDetector:
         return [30, 30, width - 30, 30, 30, height - 30, width - 30, height - 30, 70, 30, 70, height - 30, width - 70, 30, width - 70, height - 30, 90, 80, width - 90, 80, 90, height - 80, width - 90, height - 80, width // 2, 80, width // 2, height - 80]
 
 
+class AudienceHeavyPlayerDetector:
+    def detect(self, image):
+        del image
+        return {
+            11: [20, 5, 70, 65],
+            21: [125, 70, 180, 175],
+            31: [135, 190, 195, 238],
+            41: [275, 5, 319, 60],
+        }
+
+
 class ProductionLiveStreamServiceTests(unittest.TestCase):
     def _build_service(self, frame_count=18, queue_size=32):
         temp_dir = tempfile.mkdtemp(prefix='tennis_prod_test_')
@@ -129,9 +140,34 @@ class ProductionLiveStreamServiceTests(unittest.TestCase):
         self.assertEqual(command[:3], ['ffmpeg', '-hide_banner', '-loglevel'])
         self.assertIn('-re', command)
         self.assertIn('-stream_loop', command)
-        self.assertIn('-tune', command)
-        self.assertIn('zerolatency', command)
+        self.assertIn('-c:v', command)
+        self.assertIn('copy', command)
+        self.assertNotIn('-vf', command)
         self.assertEqual(command[-1], 'rtmp://127.0.0.1:1935/live/source')
+
+    def test_analysis_pipeline_prefers_players_inside_court(self):
+        temp_dir = tempfile.mkdtemp(prefix='tennis_pipeline_test_')
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        config = PipelineConfig(
+            analysis_fps=25.0,
+            output_fps=25.0,
+            metrics_path=os.path.join(temp_dir, 'live_metrics.json'),
+            status_path=os.path.join(temp_dir, 'live_packet.json'),
+        )
+        state_store = LiveStateStore()
+        pipeline = RealtimeAnalysisPipeline(
+            config=config,
+            state_store=state_store,
+            player_detector=AudienceHeavyPlayerDetector(),
+            ball_detector=StaticBallDetector(),
+            court_detector=StaticCourtDetector(),
+        )
+
+        overlay = pipeline.process_frame(type('Frame', (), {'frame_id': 1, 'pts': 0.04, 'image': frame})(), queue_size=0)
+
+        self.assertEqual(sorted(overlay.player_boxes.keys()), [1, 2])
+        self.assertLess(overlay.player_boxes[1][3], overlay.player_boxes[2][3])
+        self.assertEqual(overlay.debug['selected_players'], 2)
 
 
 class DemoServerTests(unittest.TestCase):
@@ -199,7 +235,7 @@ class DemoServerTests(unittest.TestCase):
             self.assertIn(build_sei_nal(metadata), chunk)
             response.close()
             self.assertEqual(runtime['overlay_mode'], 'websocket')
-            self.assertEqual(runtime['available_modes'], ['websocket'])
+            self.assertEqual(runtime['available_modes'], ['sei', 'websocket'])
             self.assertTrue(runtime['ws_url'].endswith(':8765/overlay'))
         finally:
             server.shutdown()

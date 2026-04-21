@@ -13,7 +13,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from realtime.analysis_pipeline import RealtimeAnalysisPipeline
-from services.h264_sei import H264SeiEncoder
+from services.h264_sei import EncodedAccessUnit, H264SeiEncoder, inject_sei
 from services.live_stream_service import build_default_detectors, resolve_runtime_device
 from services.transport_hub import TransportHub
 from streaming import (
@@ -44,7 +44,6 @@ class ProductionLiveStreamService:
         self.state_store = state_store
         self.analysis_transport_hub = analysis_transport_hub
         self.raw_transport_hub = raw_transport_hub or TransportHub()
-        self.analysis_encoder = H264SeiEncoder(fps=config.output_fps, inject_metadata=True)
         self.raw_encoder = H264SeiEncoder(fps=config.output_fps, inject_metadata=False)
         self.frame_queue = Queue(maxsize=max(config.ingest_queue_size, 1))
         self.stop_event = threading.Event()
@@ -108,15 +107,18 @@ class ProductionLiveStreamService:
                     break
                 queue_size = self.frame_queue.qsize()
                 started = time.perf_counter()
+                analysis_started = time.perf_counter()
                 overlay = self.analysis_pipeline.process_frame(item, queue_size=queue_size)
+                analysis_ms = (time.perf_counter() - analysis_started) * 1000.0
                 if overlay is None:
                     overlay = self.state_store.get_overlay()
                 packet = self._build_transport_packet(item, overlay)
                 overlay = self.state_store.get_overlay()
-                processing_ms = (time.perf_counter() - started) * 1000.0
                 analysis_ran = overlay.frame_id == item.frame_id
                 packet_data = packet.to_dict()
+                raw_encode_started = time.perf_counter()
                 raw_units = self.raw_encoder.encode_access_units(item.image, packet_data)
+                raw_encode_ms = (time.perf_counter() - raw_encode_started) * 1000.0
                 for raw_unit in raw_units:
                     self.raw_transport_hub.publish(
                         sequence_id=raw_unit.sequence_id,
@@ -125,7 +127,9 @@ class ProductionLiveStreamService:
                         is_keyframe=raw_unit.is_keyframe,
                         dts=raw_unit.dts,
                     )
-                analysis_units = self.analysis_encoder.encode_access_units(item.image, packet_data)
+                sei_inject_started = time.perf_counter()
+                analysis_units = self._build_analysis_units(raw_units, packet_data)
+                sei_inject_ms = (time.perf_counter() - sei_inject_started) * 1000.0
                 for encoded_unit in analysis_units:
                     self.analysis_transport_hub.publish(
                         sequence_id=encoded_unit.sequence_id,
@@ -134,9 +138,18 @@ class ProductionLiveStreamService:
                         is_keyframe=encoded_unit.is_keyframe,
                         dts=encoded_unit.dts,
                     )
-                self.metrics.on_processed(processing_ms, analysis_ran=analysis_ran, queue_size=queue_size)
-                self.metrics.on_output()
+                status_write_started = time.perf_counter()
                 self._write_status(packet)
+                status_write_ms = (time.perf_counter() - status_write_started) * 1000.0
+                processing_ms = (time.perf_counter() - started) * 1000.0
+                self.metrics.on_processed(processing_ms, analysis_ran=analysis_ran, queue_size=queue_size)
+                self.metrics.on_stage_timings(
+                    analysis_ms=analysis_ms,
+                    raw_encode_ms=raw_encode_ms,
+                    sei_inject_ms=sei_inject_ms,
+                    status_write_ms=status_write_ms,
+                )
+                self.metrics.on_output()
                 self._result['frames_out'] += 1
                 if self._max_frames is not None and self._result['frames_out'] >= self._max_frames:
                     self.stop_event.set()
@@ -161,6 +174,22 @@ class ProductionLiveStreamService:
             status=overlay.status,
             debug=dict(overlay.debug),
         )
+
+    def _build_analysis_units(self, raw_units: list[EncodedAccessUnit], metadata: dict) -> list[EncodedAccessUnit]:
+        analysis_units: list[EncodedAccessUnit] = []
+        for raw_unit in raw_units:
+            analysis_units.append(
+                EncodedAccessUnit(
+                    sequence_id=raw_unit.sequence_id,
+                    frame_id=raw_unit.frame_id,
+                    pts=raw_unit.pts,
+                    dts=raw_unit.dts,
+                    is_keyframe=raw_unit.is_keyframe,
+                    annexb_bytes=inject_sei(raw_unit.annexb_bytes, metadata),
+                    metadata=dict(metadata),
+                )
+            )
+        return analysis_units
 
     def _write_status(self, packet: TransportPacket) -> None:
         payload = {

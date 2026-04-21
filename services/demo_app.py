@@ -55,9 +55,8 @@ def main():
     ws_server = None
     analysis_publisher = RtmpAnnexBPublisher(analysis_transport_hub, output_url=args.analysis_rtmp_url, fps=args.output_fps)
     analysis_publisher.start()
-    if args.overlay_mode == 'websocket':
-        ws_server = OverlayWebSocketServer(analysis_transport_hub, host=args.host, port=args.ws_port)
-        ws_server.start()
+    ws_server = OverlayWebSocketServer(analysis_transport_hub, host=args.host, port=args.ws_port)
+    ws_server.start()
     worker = threading.Thread(
         target=service.run,
         kwargs={'max_frames': args.max_frames},
@@ -79,6 +78,8 @@ def main():
         )
     finally:
         analysis_publisher.stop()
+        if ws_server is not None:
+            ws_server.stop()
 
 
 if __name__ == '__main__':

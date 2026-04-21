@@ -12,6 +12,8 @@ let ws = null;
 let runtimeConfig = null;
 let activeSessionId = 0;
 let wsMetadataByFrameId = new Map();
+let rawPlayer = null;
+let overlayPlayer = null;
 
 function renderPairs(root, data) {
   root.innerHTML = '';
@@ -261,9 +263,11 @@ class StreamPlayer {
     this.annexbBuffer = new Uint8Array(0);
     this.currentAccessUnit = [];
     this.syntheticTimestampUs = 0;
+    this.abortController = null;
   }
 
   reset() {
+    this.close();
     if (this.decoder) {
       this.decoder.close();
     }
@@ -276,6 +280,23 @@ class StreamPlayer {
     this.annexbBuffer = new Uint8Array(0);
     this.currentAccessUnit = [];
     this.syntheticTimestampUs = 0;
+    this.abortController = new AbortController();
+  }
+
+  close() {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
+    if (this.decoder) {
+      try {
+        this.decoder.close();
+      } catch (_error) {
+        // Ignore decoder shutdown races during mode switches.
+      }
+      this.decoder = null;
+    }
+    this.decoderConfigured = false;
   }
 
   configureDecoderIfNeeded(codec) {
@@ -365,7 +386,10 @@ class StreamPlayer {
   }
 
   async consume(sessionId) {
-    const response = await fetch(this.streamUrl, { cache: 'no-store' });
+    const response = await fetch(this.streamUrl, {
+      cache: 'no-store',
+      signal: this.abortController ? this.abortController.signal : undefined,
+    });
     if (!response.ok || !response.body) {
       throw new Error(`stream request failed: ${response.status}`);
     }
@@ -397,6 +421,17 @@ function stopWebSocket() {
   if (ws) {
     ws.close();
     ws = null;
+  }
+}
+
+function stopPlayers() {
+  if (rawPlayer) {
+    rawPlayer.close();
+    rawPlayer = null;
+  }
+  if (overlayPlayer) {
+    overlayPlayer.close();
+    overlayPlayer = null;
   }
 }
 
@@ -450,15 +485,16 @@ async function startPlayback() {
   const sessionId = activeSessionId;
   wsMetadataByFrameId = new Map();
   stopWebSocket();
+  stopPlayers();
 
-  const rawPlayer = new StreamPlayer(
+  rawPlayer = new StreamPlayer(
     rawCanvas,
     rawCtx,
     runtimeConfig.raw_stream_url,
     () => {},
     Number(runtimeConfig.fps || 25),
   );
-  const overlayPlayer = new StreamPlayer(
+  overlayPlayer = new StreamPlayer(
     overlayCanvas,
     overlayCtx,
     runtimeConfig.analysis_stream_url,
@@ -479,17 +515,26 @@ async function startPlayback() {
   }
 
   rawPlayer.consume(sessionId).catch((error) => {
+    if (sessionId !== activeSessionId || error.name === 'AbortError') {
+      return;
+    }
     console.error(error);
     renderPairs(overlayRoot, { error: `原始流异常: ${String(error)}` });
   });
 
   overlayPlayer.consume(sessionId).catch((error) => {
+    if (sessionId !== activeSessionId || error.name === 'AbortError') {
+      return;
+    }
     console.error(error);
     renderPairs(overlayRoot, { error: `分析流异常: ${String(error)}` });
   });
 }
 
 modeSelect.addEventListener('change', () => {
+  if (!runtimeConfig) {
+    return;
+  }
   startPlayback();
 });
 

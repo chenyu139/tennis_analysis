@@ -1,0 +1,117 @@
+{
+  "packet": {
+    "frame_id": 4027,
+    "pts": 134.367567,
+    "overlay_frame_id": 4027,
+    "player_boxes": {
+      "1": [
+        494.6571960449219,
+        220.7892303466797,
+        527.4781494140625,
+        313.19769287109375
+      ],
+      "2": [
+        1246.326904296875,
+        224.229736328125,
+        1277.1441650390625,
+        313.844970703125
+      ]
+    },
+    "ball_box": null,
+    "court_keypoints": [
+      524.8738403320312,
+      350.5287780761719,
+      1281.2401123046875,
+      349.644287109375,
+      -133.50074768066406,
+      823.6929931640625,
+      1975.4595947265625,
+      812.6427612304688,
+      620.0044555664062,
+      350.5733642578125,
+      132.47579956054688,
+      821.9970092773438,
+      1186.37353515625,
+      349.6365661621094,
+      1713.470947265625,
+      813.7169799804688,
+      569.660888671875,
+      386.3497314453125,
+      1242.1820068359375,
+      385.1181335449219,
+      349.1966857910156,
+      591.1885375976562,
+      1489.0975341796875,
+      586.7041625976562,
+      906.1448364257812,
+      385.7135925292969,
+      919.9083251953125,
+      588.9619140625
+    ],
+    "player_mini_court": {
+      "1": [
+        1695,
+        201
+      ],
+      "2": [
+        1777,
+        202
+      ]
+    },
+    "ball_mini_court": {},
+    "stats_row": {
+      "player_1_number_of_shots": 1,
+      "player_1_total_shot_speed": 10.800242603870204,
+      "player_1_last_shot_speed": 10.800242603870204,
+      "player_1_total_player_speed": 46.799344708645684,
+      "player_1_last_player_speed": 0.0,
+      "player_1_total_distance_run": 25.697120181118628,
+      "player_1_last_distance_run": 0.0,
+      "player_1_total_calories_burned": 2.0765328875958335,
+      "player_1_last_calories_burned": 0.0,
+      "player_2_number_of_shots": 0,
+      "player_2_total_shot_speed": 0.0,
+      "player_2_last_shot_speed": 0.0,
+      "player_2_total_player_speed": 42.68107407353205,
+      "player_2_last_player_speed": 0.0,
+      "player_2_total_distance_run": 23.137084819285224,
+      "player_2_last_distance_run": 0.0,
+      "player_2_total_calories_burned": 1.9655416295679182,
+      "player_2_last_calories_burned": 0.0,
+      "ball_speed_kmh": 6.360525734631306
+    },
+    "quality_level": "balanced",
+    "status": "ok",
+    "debug": {
+      "processing_ms": 106.31,
+      "selected_players": 2,
+      "court_points": 14,
+      "court_ms": 20.06,
+      "player_ms": 55.16,
+      "ball_ms": 31.05
+    }
+  },
+  "metrics": {
+    "frames_in": 4087,
+    "frames_processed": 59,
+    "frames_out": 59,
+    "frames_dropped": 4020,
+    "analysis_runs": 59,
+    "analysis_skips": 0,
+    "queue_max_size": 8,
+    "last_processing_ms": 121.17,
+    "avg_processing_ms": 168.2,
+    "last_analysis_ms": 108.48,
+    "avg_analysis_ms": 152.24,
+    "last_raw_encode_ms": 10.95,
+    "avg_raw_encode_ms": 12.17,
+    "last_sei_inject_ms": 1.16,
+    "avg_sei_inject_ms": 3.15,
+    "last_status_write_ms": 0.48,
+    "avg_status_write_ms": 0.53,
+    "uptime_seconds": 10.16,
+    "output_fps": 8.18,
+    "status": "starting",
+    "last_error": ""
+  }
+}

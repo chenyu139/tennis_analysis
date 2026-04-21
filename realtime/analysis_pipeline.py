@@ -85,14 +85,32 @@ class RealtimeAnalysisPipeline:
         player_boxes = {}
         ball_box = None
         shot_event = None
+        court_keypoints = self.court_state.get()
 
+        if self.scheduler.should_refresh_court(video_frame.pts):
+            court_started = time.perf_counter()
+            try:
+                if self.court_detector is not None:
+                    keypoints = self._detect_court(video_frame.image)
+                    self.court_state.update(keypoints, video_frame.pts)
+                    court_keypoints = self.court_state.get()
+            except Exception as exc:
+                if status == 'ok':
+                    status = 'court_error'
+                debug['court_error'] = str(exc)
+            debug['court_ms'] = round((time.perf_counter() - court_started) * 1000.0, 2)
+
+        player_started = time.perf_counter()
         try:
             if self.player_detector is not None:
-                player_boxes = self._detect_players(video_frame.image) or {}
+                raw_player_boxes = self._detect_players(video_frame.image) or {}
+                player_boxes = self._select_players_for_tennis(raw_player_boxes, court_keypoints, video_frame.image.shape) or {}
         except Exception as exc:
             status = 'player_error'
             debug['player_error'] = str(exc)
+        debug['player_ms'] = round((time.perf_counter() - player_started) * 1000.0, 2)
 
+        ball_started = time.perf_counter()
         try:
             if self.ball_detector is not None:
                 ball_box = self._select_ball_box(self._detect_ball(video_frame.image))
@@ -100,21 +118,10 @@ class RealtimeAnalysisPipeline:
             if status == 'ok':
                 status = 'ball_error'
             debug['ball_error'] = str(exc)
+        debug['ball_ms'] = round((time.perf_counter() - ball_started) * 1000.0, 2)
 
         normalized_players = self.player_state.update(player_boxes)
         ball_box, shot_event = self.ball_history.update(video_frame.pts, ball_box)
-
-        if self.scheduler.should_refresh_court(video_frame.pts):
-            try:
-                if self.court_detector is not None:
-                    keypoints = self._detect_court(video_frame.image)
-                    self.court_state.update(keypoints, video_frame.pts)
-            except Exception as exc:
-                if status == 'ok':
-                    status = 'court_error'
-                debug['court_error'] = str(exc)
-
-        court_keypoints = self.court_state.get()
         player_mini_court, ball_mini_court = self.projector.project(normalized_players, ball_box, court_keypoints)
 
         if shot_event is not None and shot_event.player_id is None:
@@ -143,7 +150,12 @@ class RealtimeAnalysisPipeline:
             ball_mini_court=ball_mini_court,
             stats_row=stats_row,
             quality_level=quality,
-            debug={'processing_ms': round(processing_ms, 2), **debug},
+            debug={
+                'processing_ms': round(processing_ms, 2),
+                'selected_players': len(player_boxes),
+                'court_points': len(court_keypoints) // 2,
+                **debug,
+            },
             status=status,
         )
         self.state_store.update_overlay(overlay)
@@ -180,6 +192,79 @@ class RealtimeAnalysisPipeline:
         if isinstance(raw_ball, (list, tuple)) and len(raw_ball) == 4:
             return list(raw_ball)
         return None
+
+    def _select_players_for_tennis(self, player_boxes, court_keypoints, image_shape):
+        if not player_boxes:
+            return {}
+
+        frame_height, frame_width = image_shape[:2]
+        scored_players = []
+        for track_id, bbox in player_boxes.items():
+            score = self._score_player_candidate(bbox, court_keypoints, frame_width, frame_height)
+            if score is not None:
+                scored_players.append((track_id, list(bbox), score))
+
+        if not scored_players:
+            return {}
+
+        if not court_keypoints:
+            scored_players.sort(key=lambda item: (get_foot_position(item[1])[1], -item[2]))
+            return {track_id: bbox for track_id, bbox, _score in scored_players[:2]}
+
+        top_half = []
+        bottom_half = []
+        split_y = self._court_mid_y(court_keypoints)
+        for track_id, bbox, score in scored_players:
+            foot_y = get_foot_position(bbox)[1]
+            if foot_y <= split_y:
+                top_half.append((track_id, bbox, score))
+            else:
+                bottom_half.append((track_id, bbox, score))
+
+        selected = []
+        if top_half:
+            selected.append(max(top_half, key=lambda item: item[2]))
+        if bottom_half:
+            selected.append(max(bottom_half, key=lambda item: item[2]))
+
+        if len(selected) < 2:
+            chosen_ids = {track_id for track_id, _bbox, _score in selected}
+            remaining = [item for item in scored_players if item[0] not in chosen_ids]
+            remaining.sort(key=lambda item: item[2], reverse=True)
+            selected.extend(remaining[: 2 - len(selected)])
+
+        selected.sort(key=lambda item: get_foot_position(item[1])[1])
+        return {track_id: bbox for track_id, bbox, _score in selected[:2]}
+
+    def _score_player_candidate(self, bbox, court_keypoints, frame_width: int, frame_height: int):
+        foot_x, foot_y = get_foot_position(bbox)
+        box_width = max(float(bbox[2] - bbox[0]), 1.0)
+        box_height = max(float(bbox[3] - bbox[1]), 1.0)
+        area_score = min((box_width * box_height) / max(frame_width * frame_height, 1), 0.2)
+
+        if not court_keypoints:
+            center_bias = 1.0 - min(abs(foot_x - (frame_width / 2.0)) / max(frame_width / 2.0, 1.0), 1.0)
+            return area_score * 0.6 + center_bias * 0.4
+
+        xs = court_keypoints[0::2]
+        ys = court_keypoints[1::2]
+        left = min(xs)
+        right = max(xs)
+        top = min(ys)
+        bottom = max(ys)
+        expand_x = max((right - left) * 0.08, 12.0)
+        expand_y = max((bottom - top) * 0.12, 12.0)
+        if not (left - expand_x <= foot_x <= right + expand_x and top - expand_y <= foot_y <= bottom + expand_y):
+            return None
+
+        center_x = (left + right) / 2.0
+        center_bias = 1.0 - min(abs(foot_x - center_x) / max((right - left) / 2.0, 1.0), 1.0)
+        vertical_bias = 1.0 - min(abs(foot_y - ((top + bottom) / 2.0)) / max((bottom - top) / 2.0, 1.0), 1.0)
+        return area_score * 0.45 + center_bias * 0.4 + vertical_bias * 0.15
+
+    def _court_mid_y(self, court_keypoints):
+        ys = court_keypoints[1::2]
+        return (min(ys) + max(ys)) / 2.0
 
     def _infer_shooter(self, player_mini_court, ball_mini_court):
         ball_position = ball_mini_court.get(1)

@@ -55,6 +55,14 @@ class ServiceMetrics:
     queue_max_size: int = 0
     last_processing_ms: float = 0.0
     avg_processing_ms: float = 0.0
+    last_analysis_ms: float = 0.0
+    avg_analysis_ms: float = 0.0
+    last_raw_encode_ms: float = 0.0
+    avg_raw_encode_ms: float = 0.0
+    last_sei_inject_ms: float = 0.0
+    avg_sei_inject_ms: float = 0.0
+    last_status_write_ms: float = 0.0
+    avg_status_write_ms: float = 0.0
     uptime_seconds: float = 0.0
     output_fps: float = 0.0
     status: str = 'idle'
@@ -71,6 +79,14 @@ class ServiceMetrics:
             'queue_max_size': self.queue_max_size,
             'last_processing_ms': round(self.last_processing_ms, 2),
             'avg_processing_ms': round(self.avg_processing_ms, 2),
+            'last_analysis_ms': round(self.last_analysis_ms, 2),
+            'avg_analysis_ms': round(self.avg_analysis_ms, 2),
+            'last_raw_encode_ms': round(self.last_raw_encode_ms, 2),
+            'avg_raw_encode_ms': round(self.avg_raw_encode_ms, 2),
+            'last_sei_inject_ms': round(self.last_sei_inject_ms, 2),
+            'avg_sei_inject_ms': round(self.avg_sei_inject_ms, 2),
+            'last_status_write_ms': round(self.last_status_write_ms, 2),
+            'avg_status_write_ms': round(self.avg_status_write_ms, 2),
             'uptime_seconds': round(self.uptime_seconds, 2),
             'output_fps': round(self.output_fps, 2),
             'status': self.status,

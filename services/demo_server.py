@@ -87,7 +87,7 @@ class DemoRequestHandler(BaseHTTPRequestHandler):
             overlay_mode = getattr(self.config, 'overlay_mode', 'sei')
             self._send_json({
                 'overlay_mode': overlay_mode,
-                'available_modes': [overlay_mode],
+                'available_modes': ['sei', 'websocket'] if self.ws_port is not None else ['sei'],
                 'ws_url': f'ws://{host}:{self.ws_port}/overlay' if self.ws_port is not None else None,
                 'raw_stream_url': '/stream/raw.h264',
                 'analysis_stream_url': '/stream/analysis.h264',
