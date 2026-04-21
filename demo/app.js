@@ -162,6 +162,76 @@ function normalizeBox(box) {
   return Array.isArray(box) && box.length === 4 ? box.map((value) => Number(value)) : null;
 }
 
+function normalizeTrail(points) {
+  if (!Array.isArray(points)) {
+    return [];
+  }
+  return points
+    .filter((point) => Array.isArray(point) && point.length >= 2)
+    .map((point) => [Number(point[0]), Number(point[1])])
+    .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+}
+
+function traceSmoothTrail(ctx, points) {
+  if (!points.length) {
+    return;
+  }
+  ctx.beginPath();
+  ctx.moveTo(points[0][0], points[0][1]);
+  if (points.length === 2) {
+    ctx.lineTo(points[1][0], points[1][1]);
+    return;
+  }
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const current = points[index];
+    const next = points[index + 1];
+    const midX = (current[0] + next[0]) / 2;
+    const midY = (current[1] + next[1]) / 2;
+    ctx.quadraticCurveTo(current[0], current[1], midX, midY);
+  }
+  const penultimate = points[points.length - 2];
+  const last = points[points.length - 1];
+  ctx.quadraticCurveTo(penultimate[0], penultimate[1], last[0], last[1]);
+}
+
+function drawSmoothTrail(ctx, points) {
+  if (points.length < 2) {
+    return;
+  }
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  ctx.shadowBlur = 18;
+  ctx.shadowColor = 'rgba(255, 120, 0, 0.28)';
+  ctx.strokeStyle = 'rgba(255, 120, 0, 0.18)';
+  ctx.lineWidth = 18;
+  traceSmoothTrail(ctx, points);
+  ctx.stroke();
+
+  ctx.shadowBlur = 10;
+  ctx.shadowColor = 'rgba(255, 180, 0, 0.2)';
+  ctx.strokeStyle = 'rgba(255, 170, 0, 0.32)';
+  ctx.lineWidth = 10;
+  traceSmoothTrail(ctx, points);
+  ctx.stroke();
+
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = 'rgba(255, 235, 160, 0.7)';
+  ctx.lineWidth = 4;
+  traceSmoothTrail(ctx, points);
+  ctx.stroke();
+
+  points.forEach((point, index) => {
+    const alpha = (index + 1) / points.length;
+    ctx.fillStyle = `rgba(255, 220, 90, ${0.12 + alpha * 0.24})`;
+    ctx.beginPath();
+    ctx.arc(point[0], point[1], 2.5 + alpha * 3.5, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.restore();
+}
+
 function rememberWsMetadata(metadata) {
   if (!metadata || metadata.frame_id === undefined) {
     return;
@@ -215,6 +285,11 @@ function drawOverlay(ctx, canvas, metadata) {
   });
 
   const ballBox = normalizeBox(metadata.ball_box);
+  const ballTrail = normalizeTrail(metadata.ball_trail);
+  if (ballTrail.length >= 2) {
+    drawSmoothTrail(ctx, ballTrail);
+  }
+
   if (ballBox) {
     const [x1, y1, x2, y2] = ballBox;
     const centerX = (x1 + x2) / 2;

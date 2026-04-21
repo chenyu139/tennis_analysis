@@ -97,15 +97,28 @@ class BallTracker:
 
     def detect_frame(self,frame):
         self._ensure_model()
-        predict_kwargs = {'conf': 0.15}
+        predict_kwargs = {
+            'conf': 0.22,
+            'iou': 0.35,
+            'max_det': 1,
+            'verbose': False,
+        }
         if self.device is not None:
             predict_kwargs['device'] = self.device
+            if str(self.device).startswith('cuda'):
+                predict_kwargs['half'] = True
         results = self.model.predict(frame, **predict_kwargs)[0]
 
         ball_dict = {}
+        best_box = None
+        best_conf = -1.0
         for box in results.boxes:
-            result = box.xyxy.tolist()[0]
-            ball_dict[1] = result
+            confidence = float(box.conf.tolist()[0]) if box.conf is not None else 0.0
+            if confidence > best_conf:
+                best_conf = confidence
+                best_box = box.xyxy.tolist()[0]
+        if best_box is not None:
+            ball_dict[1] = best_box
         del results  # FIX: 每帧推理后显式释放检测结果对象，减少长视频处理时内存滞留
         
         return ball_dict

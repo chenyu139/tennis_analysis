@@ -166,6 +166,7 @@ class ProductionLiveStreamService:
             overlay_frame_id=overlay.frame_id,
             player_boxes={str(key): value for key, value in overlay.player_boxes.items()},
             ball_box=overlay.ball_box,
+            ball_trail=overlay.ball_trail,
             court_keypoints=overlay.court_keypoints,
             player_mini_court={str(key): value for key, value in overlay.player_mini_court.items()},
             ball_mini_court={str(key): value for key, value in overlay.ball_mini_court.items()},

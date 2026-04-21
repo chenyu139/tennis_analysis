@@ -19,7 +19,7 @@ from streaming import IterableFrameIngress, LiveStateStore, PipelineConfig
 class StaticPlayerDetector:
     def detect(self, image):
         del image
-        return {1: [30, 60, 80, 180], 2: [200, 60, 250, 180]}
+        return {1: [132, 18, 186, 96], 2: [138, 140, 198, 228]}
 
 
 class StaticBallDetector:
@@ -43,9 +43,43 @@ class AudienceHeavyPlayerDetector:
         del image
         return {
             11: [20, 5, 70, 65],
-            21: [125, 70, 180, 175],
-            31: [135, 190, 195, 238],
+            21: [128, 18, 182, 96],
+            31: [136, 148, 198, 228],
             41: [275, 5, 319, 60],
+        }
+
+
+class SideBiasedPlayerDetector:
+    def detect(self, image):
+        del image
+        return {
+            10: [35, 72, 96, 198],
+            20: [128, 20, 188, 94],
+            30: [142, 144, 206, 228],
+            40: [232, 76, 292, 202],
+        }
+
+
+class NoSideFallbackPlayerDetector:
+    def detect(self, image):
+        del image
+        return {
+            10: [138, 48, 188, 150],
+            20: [18, 142, 72, 232],
+            30: [252, 138, 314, 230],
+        }
+
+
+class CountingPlayerDetector:
+    def __init__(self):
+        self.calls = 0
+
+    def detect(self, image):
+        del image
+        self.calls += 1
+        return {
+            1: [132, 18, 188, 98],
+            2: [138, 146, 198, 228],
         }
 
 
@@ -115,6 +149,8 @@ class ProductionLiveStreamServiceTests(unittest.TestCase):
         self.assertIsNotNone(raw_packet)
         self.assertIn('player_boxes', packet.metadata)
         self.assertIn('ball_box', packet.metadata)
+        self.assertIn('ball_trail', packet.metadata)
+        self.assertGreaterEqual(len(packet.metadata['ball_trail']), 2)
         self.assertTrue(packet.annexb_bytes.startswith(b'\x00\x00'))
         self.assertEqual(extract_sei_messages(packet.annexb_bytes)[0]['frame_id'], packet.frame_id)
         self.assertEqual(extract_sei_messages(raw_packet.annexb_bytes), [])
@@ -168,6 +204,116 @@ class ProductionLiveStreamServiceTests(unittest.TestCase):
         self.assertEqual(sorted(overlay.player_boxes.keys()), [1, 2])
         self.assertLess(overlay.player_boxes[1][3], overlay.player_boxes[2][3])
         self.assertEqual(overlay.debug['selected_players'], 2)
+
+    def test_analysis_pipeline_prefers_top_and_bottom_players_for_tennis(self):
+        temp_dir = tempfile.mkdtemp(prefix='tennis_pipeline_side_test_')
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        config = PipelineConfig(
+            analysis_fps=25.0,
+            output_fps=25.0,
+            metrics_path=os.path.join(temp_dir, 'live_metrics.json'),
+            status_path=os.path.join(temp_dir, 'live_packet.json'),
+        )
+        state_store = LiveStateStore()
+        pipeline = RealtimeAnalysisPipeline(
+            config=config,
+            state_store=state_store,
+            player_detector=SideBiasedPlayerDetector(),
+            ball_detector=StaticBallDetector(),
+            court_detector=StaticCourtDetector(),
+        )
+
+        overlay = pipeline.process_frame(type('Frame', (), {'frame_id': 1, 'pts': 0.04, 'image': frame})(), queue_size=0)
+
+        selected_boxes = list(overlay.player_boxes.values())
+        self.assertEqual(len(selected_boxes), 2)
+        self.assertIn([128, 20, 188, 94], selected_boxes)
+        self.assertIn([142, 144, 206, 228], selected_boxes)
+        xs = [((box[0] + box[2]) / 2) for box in selected_boxes]
+        self.assertTrue(all(120 <= x <= 220 for x in xs))
+
+    def test_analysis_pipeline_exposes_ball_trail(self):
+        temp_dir = tempfile.mkdtemp(prefix='tennis_pipeline_ball_trail_test_')
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        config = PipelineConfig(
+            analysis_fps=25.0,
+            output_fps=25.0,
+            ball_trail_size=6,
+            metrics_path=os.path.join(temp_dir, 'live_metrics.json'),
+            status_path=os.path.join(temp_dir, 'live_packet.json'),
+        )
+        state_store = LiveStateStore()
+        pipeline = RealtimeAnalysisPipeline(
+            config=config,
+            state_store=state_store,
+            player_detector=StaticPlayerDetector(),
+            ball_detector=StaticBallDetector(),
+            court_detector=StaticCourtDetector(),
+        )
+
+        overlay = None
+        for frame_id in range(1, 5):
+            overlay = pipeline.process_frame(type('Frame', (), {'frame_id': frame_id, 'pts': frame_id / 25.0, 'image': frame})(), queue_size=0)
+
+        self.assertIsNotNone(overlay)
+        self.assertGreaterEqual(len(overlay.ball_trail), 3)
+        self.assertEqual(len(overlay.ball_trail[-1]), 2)
+        ball_box = overlay.ball_box
+        self.assertIsNotNone(ball_box)
+        expected_center_x = (ball_box[0] + ball_box[2]) / 2.0
+        expected_center_y = (ball_box[1] + ball_box[3]) / 2.0
+        self.assertAlmostEqual(overlay.ball_trail[-1][0], expected_center_x)
+        self.assertAlmostEqual(overlay.ball_trail[-1][1], expected_center_y)
+
+    def test_analysis_pipeline_does_not_fallback_to_side_people(self):
+        temp_dir = tempfile.mkdtemp(prefix='tennis_pipeline_no_side_fallback_test_')
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        config = PipelineConfig(
+            analysis_fps=25.0,
+            output_fps=25.0,
+            metrics_path=os.path.join(temp_dir, 'live_metrics.json'),
+            status_path=os.path.join(temp_dir, 'live_packet.json'),
+        )
+        state_store = LiveStateStore()
+        pipeline = RealtimeAnalysisPipeline(
+            config=config,
+            state_store=state_store,
+            player_detector=NoSideFallbackPlayerDetector(),
+            ball_detector=StaticBallDetector(),
+            court_detector=StaticCourtDetector(),
+        )
+
+        overlay = pipeline.process_frame(type('Frame', (), {'frame_id': 1, 'pts': 0.04, 'image': frame})(), queue_size=0)
+
+        self.assertEqual(len(overlay.player_boxes), 1)
+        self.assertIn([138, 48, 188, 150], list(overlay.player_boxes.values()))
+
+    def test_analysis_pipeline_reuses_player_detections_between_intervals(self):
+        temp_dir = tempfile.mkdtemp(prefix='tennis_pipeline_reuse_test_')
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        player_detector = CountingPlayerDetector()
+        config = PipelineConfig(
+            analysis_fps=25.0,
+            output_fps=25.0,
+            player_detect_every_n_frames=2,
+            metrics_path=os.path.join(temp_dir, 'live_metrics.json'),
+            status_path=os.path.join(temp_dir, 'live_packet.json'),
+        )
+        state_store = LiveStateStore()
+        pipeline = RealtimeAnalysisPipeline(
+            config=config,
+            state_store=state_store,
+            player_detector=player_detector,
+            ball_detector=StaticBallDetector(),
+            court_detector=StaticCourtDetector(),
+        )
+
+        overlay_first = pipeline.process_frame(type('Frame', (), {'frame_id': 1, 'pts': 0.04, 'image': frame})(), queue_size=0)
+        overlay_second = pipeline.process_frame(type('Frame', (), {'frame_id': 2, 'pts': 0.08, 'image': frame})(), queue_size=0)
+
+        self.assertEqual(player_detector.calls, 1)
+        self.assertFalse(overlay_first.debug['player_reused'])
+        self.assertTrue(overlay_second.debug['player_reused'])
 
 
 class DemoServerTests(unittest.TestCase):

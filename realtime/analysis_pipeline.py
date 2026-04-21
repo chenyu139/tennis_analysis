@@ -61,6 +61,7 @@ class RealtimeAnalysisPipeline:
         self.player_state = PlayerTrackState(history_size=config.player_history_size)
         self.ball_history = BallHistoryBuffer(
             history_size=config.ball_history_size,
+            trail_size=config.ball_trail_size,
             max_gap_seconds=config.max_ball_gap_seconds,
             confirm_window_seconds=config.shot_confirm_window_seconds,
             shot_cooldown_seconds=config.shot_cooldown_seconds,
@@ -70,6 +71,8 @@ class RealtimeAnalysisPipeline:
         self.projector = None
         self.stats_aggregator = None
         self.consecutive_failures = 0
+        self.analysis_count = 0
+        self.cached_player_boxes = {}
 
     def process_frame(self, video_frame, queue_size: int = 0):
         if self.projector is None:
@@ -84,6 +87,7 @@ class RealtimeAnalysisPipeline:
         debug = {}
         player_boxes = {}
         ball_box = None
+        ball_trail = []
         shot_event = None
         court_keypoints = self.court_state.get()
 
@@ -103,8 +107,15 @@ class RealtimeAnalysisPipeline:
         player_started = time.perf_counter()
         try:
             if self.player_detector is not None:
-                raw_player_boxes = self._detect_players(video_frame.image) or {}
-                player_boxes = self._select_players_for_tennis(raw_player_boxes, court_keypoints, video_frame.image.shape) or {}
+                should_refresh_players = self._should_refresh_players()
+                if should_refresh_players:
+                    raw_player_boxes = self._detect_players(video_frame.image) or {}
+                    player_boxes = self._select_players_for_tennis(raw_player_boxes, court_keypoints, video_frame.image.shape) or {}
+                    if player_boxes:
+                        self.cached_player_boxes = {track_id: list(bbox) for track_id, bbox in player_boxes.items()}
+                else:
+                    player_boxes = {track_id: list(bbox) for track_id, bbox in self.cached_player_boxes.items()}
+                debug['player_reused'] = not should_refresh_players
         except Exception as exc:
             status = 'player_error'
             debug['player_error'] = str(exc)
@@ -121,7 +132,7 @@ class RealtimeAnalysisPipeline:
         debug['ball_ms'] = round((time.perf_counter() - ball_started) * 1000.0, 2)
 
         normalized_players = self.player_state.update(player_boxes)
-        ball_box, shot_event = self.ball_history.update(video_frame.pts, ball_box)
+        ball_box, shot_event, ball_trail = self.ball_history.update(video_frame.pts, ball_box)
         player_mini_court, ball_mini_court = self.projector.project(normalized_players, ball_box, court_keypoints)
 
         if shot_event is not None and shot_event.player_id is None:
@@ -145,6 +156,7 @@ class RealtimeAnalysisPipeline:
             pts=video_frame.pts,
             player_boxes=normalized_players,
             ball_box=ball_box,
+            ball_trail=ball_trail,
             court_keypoints=court_keypoints,
             player_mini_court=player_mini_court,
             ball_mini_court=ball_mini_court,
@@ -158,6 +170,7 @@ class RealtimeAnalysisPipeline:
             },
             status=status,
         )
+        self.analysis_count += 1
         self.state_store.update_overlay(overlay)
         return overlay
 
@@ -198,53 +211,42 @@ class RealtimeAnalysisPipeline:
             return {}
 
         frame_height, frame_width = image_shape[:2]
-        scored_players = []
+        top_half = []
+        bottom_half = []
         for track_id, bbox in player_boxes.items():
             score = self._score_player_candidate(bbox, court_keypoints, frame_width, frame_height)
             if score is not None:
-                scored_players.append((track_id, list(bbox), score))
-
-        if not scored_players:
-            return {}
-
-        if not court_keypoints:
-            scored_players.sort(key=lambda item: (get_foot_position(item[1])[1], -item[2]))
-            return {track_id: bbox for track_id, bbox, _score in scored_players[:2]}
-
-        top_half = []
-        bottom_half = []
-        split_y = self._court_mid_y(court_keypoints)
-        for track_id, bbox, score in scored_players:
-            foot_y = get_foot_position(bbox)[1]
-            if foot_y <= split_y:
-                top_half.append((track_id, bbox, score))
-            else:
-                bottom_half.append((track_id, bbox, score))
+                zone = self._classify_player_zone(bbox, court_keypoints, frame_width, frame_height)
+                if zone == 'top':
+                    top_half.append((track_id, list(bbox), score))
+                elif zone == 'bottom':
+                    bottom_half.append((track_id, list(bbox), score))
 
         selected = []
         if top_half:
-            selected.append(max(top_half, key=lambda item: item[2]))
+            selected.append(max(top_half, key=self._player_priority))
         if bottom_half:
-            selected.append(max(bottom_half, key=lambda item: item[2]))
-
-        if len(selected) < 2:
-            chosen_ids = {track_id for track_id, _bbox, _score in selected}
-            remaining = [item for item in scored_players if item[0] not in chosen_ids]
-            remaining.sort(key=lambda item: item[2], reverse=True)
-            selected.extend(remaining[: 2 - len(selected)])
+            selected.append(max(bottom_half, key=self._player_priority))
 
         selected.sort(key=lambda item: get_foot_position(item[1])[1])
         return {track_id: bbox for track_id, bbox, _score in selected[:2]}
 
     def _score_player_candidate(self, bbox, court_keypoints, frame_width: int, frame_height: int):
         foot_x, foot_y = get_foot_position(bbox)
-        box_width = max(float(bbox[2] - bbox[0]), 1.0)
-        box_height = max(float(bbox[3] - bbox[1]), 1.0)
-        area_score = min((box_width * box_height) / max(frame_width * frame_height, 1), 0.2)
+        area_score = min(self._bbox_area(bbox) / max(frame_width * frame_height, 1), 0.25)
 
         if not court_keypoints:
-            center_bias = 1.0 - min(abs(foot_x - (frame_width / 2.0)) / max(frame_width / 2.0, 1.0), 1.0)
-            return area_score * 0.6 + center_bias * 0.4
+            center_x = frame_width / 2.0
+            center_y = frame_height / 2.0
+            center_gate = max(frame_width * 0.22, 28.0)
+            if abs(foot_x - center_x) > center_gate:
+                return None
+            vertical_deadband = max(frame_height * 0.08, 16.0)
+            if abs(foot_y - center_y) < vertical_deadband:
+                return None
+            center_bias = 1.0 - min(abs(foot_x - center_x) / center_gate, 1.0)
+            baseline_bias = min(abs(foot_y - center_y) / max(frame_height / 2.0, 1.0), 1.0)
+            return area_score * 0.3 + center_bias * 0.45 + baseline_bias * 0.25
 
         xs = court_keypoints[0::2]
         ys = court_keypoints[1::2]
@@ -256,15 +258,59 @@ class RealtimeAnalysisPipeline:
         expand_y = max((bottom - top) * 0.12, 12.0)
         if not (left - expand_x <= foot_x <= right + expand_x and top - expand_y <= foot_y <= bottom + expand_y):
             return None
+        overlap_ratio = self._overlap_ratio(bbox, left - expand_x, top - expand_y, right + expand_x, bottom + expand_y)
+        if overlap_ratio < 0.55:
+            return None
 
         center_x = (left + right) / 2.0
+        center_y = (top + bottom) / 2.0
+        center_gate = max((right - left) * 0.24, 26.0)
+        if abs(foot_x - center_x) > center_gate:
+            return None
+        vertical_deadband = max((bottom - top) * 0.1, 18.0)
+        if abs(foot_y - center_y) < vertical_deadband:
+            return None
         center_bias = 1.0 - min(abs(foot_x - center_x) / max((right - left) / 2.0, 1.0), 1.0)
-        vertical_bias = 1.0 - min(abs(foot_y - ((top + bottom) / 2.0)) / max((bottom - top) / 2.0, 1.0), 1.0)
-        return area_score * 0.45 + center_bias * 0.4 + vertical_bias * 0.15
+        baseline_bias = min(abs(foot_y - center_y) / max((bottom - top) / 2.0, 1.0), 1.0)
+        return area_score * 0.1 + overlap_ratio * 0.35 + center_bias * 0.35 + baseline_bias * 0.2
 
-    def _court_mid_y(self, court_keypoints):
-        ys = court_keypoints[1::2]
-        return (min(ys) + max(ys)) / 2.0
+    def _player_priority(self, item):
+        _track_id, bbox, score = item
+        return (score, self._bbox_area(bbox))
+
+    def _bbox_area(self, bbox):
+        return max(float(bbox[2] - bbox[0]), 1.0) * max(float(bbox[3] - bbox[1]), 1.0)
+
+    def _overlap_ratio(self, bbox, left, top, right, bottom):
+        overlap_left = max(float(bbox[0]), left)
+        overlap_top = max(float(bbox[1]), top)
+        overlap_right = min(float(bbox[2]), right)
+        overlap_bottom = min(float(bbox[3]), bottom)
+        overlap_width = max(overlap_right - overlap_left, 0.0)
+        overlap_height = max(overlap_bottom - overlap_top, 0.0)
+        overlap_area = overlap_width * overlap_height
+        return overlap_area / max(self._bbox_area(bbox), 1.0)
+
+    def _classify_player_zone(self, bbox, court_keypoints, frame_width: int, frame_height: int):
+        foot_y = get_foot_position(bbox)[1]
+        if not court_keypoints:
+            center_y = frame_height / 2.0
+            deadband = max(frame_height * 0.08, 16.0)
+        else:
+            ys = court_keypoints[1::2]
+            center_y = (min(ys) + max(ys)) / 2.0
+            deadband = max((max(ys) - min(ys)) * 0.1, 18.0)
+        if foot_y <= center_y - deadband:
+            return 'top'
+        if foot_y >= center_y + deadband:
+            return 'bottom'
+        return None
+
+    def _should_refresh_players(self):
+        interval = max(int(getattr(self.config, 'player_detect_every_n_frames', 1)), 1)
+        if not self.cached_player_boxes:
+            return True
+        return self.analysis_count % interval == 0
 
     def _infer_shooter(self, player_mini_court, ball_mini_court):
         ball_position = ball_mini_court.get(1)

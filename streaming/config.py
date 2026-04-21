@@ -7,11 +7,13 @@ class PipelineConfig:
     analysis_fps: float = 15.0
     output_fps: float = 25.0
     court_refresh_seconds: float = 1.0
+    player_detect_every_n_frames: int = 2
     render_stats: bool = True
     render_mini_court: bool = True
     render_court_keypoints: bool = False
     player_history_size: int = 30
     ball_history_size: int = 45
+    ball_trail_size: int = 14
     max_ball_gap_seconds: float = 0.5
     shot_confirm_window_seconds: float = 0.35
     shot_cooldown_seconds: float = 0.45

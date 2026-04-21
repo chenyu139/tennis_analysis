@@ -79,9 +79,17 @@ class PlayerTracker:
 
     def detect_frame(self,frame):
         self._ensure_model()
-        track_kwargs = {'persist': True}
+        track_kwargs = {
+            'persist': True,
+            'classes': [0],
+            'conf': 0.3,
+            'tracker': 'bytetrack.yaml',
+            'verbose': False,
+        }
         if self.device is not None:
             track_kwargs['device'] = self.device
+            if str(self.device).startswith('cuda'):
+                track_kwargs['half'] = True
         results = self.model.track(frame, **track_kwargs)[0]
         id_name_dict = results.names
 
