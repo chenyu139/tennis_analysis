@@ -13,7 +13,7 @@ if str(ROOT_DIR) not in sys.path:
 from services.mediamtx_manager import is_tcp_port_open, start_mediamtx, wait_for_tcp_port, write_default_config
 
 
-DEFAULT_INPUT = ROOT_DIR / 'input_videos' / 'tennis.mp4'
+DEFAULT_INPUT = ROOT_DIR / 'input_videos' / 'youtube' / 'youtube_match.mp4'
 DEFAULT_CONFIG = ROOT_DIR / 'runtime' / 'mediamtx.yml'
 DEFAULT_LOG = ROOT_DIR / 'runtime' / 'mediamtx.log'
 
@@ -108,7 +108,7 @@ class RtmpSourceService:
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Start MediaMTX and push tennis.mp4 to a local RTMP stream.')
+    parser = argparse.ArgumentParser(description='Start MediaMTX and push the default demo video to a local RTMP stream.')
     parser.add_argument('--input', default=str(DEFAULT_INPUT))
     parser.add_argument('--rtmp-url', default='rtmp://127.0.0.1:1935/live/source')
     parser.add_argument('--rtmp-host', default='127.0.0.1')

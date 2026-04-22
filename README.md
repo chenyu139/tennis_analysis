@@ -4,7 +4,7 @@
 
 这个版本实现了完整的直播链路，满足以下目标：
 
-- 将 `input_videos/tennis.mp4` 实时转成 RTMP 推流，模拟现场推流。
+- 将 `input_videos/youtube/youtube_match.mp4` 实时转成 RTMP 推流，模拟现场推流。
 - 核心服务从 RTMP 拉流，使用 GPU 完成球员、网球、球场关键点分析。
 - 核心服务同时输出两路结果：
   - 原始 H.264 码流
@@ -22,7 +22,7 @@
 完整链路如下：
 
 ```text
-input_videos/tennis.mp4
+input_videos/youtube/youtube_match.mp4
   -> rtmp_source_service.py
   -> MediaMTX RTMP: live/source
   -> production_live_stream_service.py
@@ -48,7 +48,7 @@ input_videos/tennis.mp4
 
 - `services/rtmp_source_service.py`
   - 启动本地 MediaMTX
-  - 将 `tennis.mp4` 低时延推到 `rtmp://127.0.0.1:1935/live/source`
+  - 将 `youtube_match.mp4` 低时延推到 `rtmp://127.0.0.1:1935/live/source`
 - `services/production_live_stream_service.py`
   - 从文件或 RTMP 拉流
   - 运行实时分析
@@ -71,15 +71,15 @@ input_videos/tennis.mp4
 
 ```bash
 bash scripts/start_full_demo_stack.sh \
-  /home/chenyu/workplace/tennis_analysis/input_videos/tennis.mp4 \
+  /home/chenyu/workplace/tennis_analysis/input_videos/youtube/youtube_match.mp4 \
   sei \
-  8080 \
+  18080 \
   8765
 ```
 
 启动后打开：
 
-- Demo 页面：`http://127.0.0.1:8080`
+- Demo 页面：`http://127.0.0.1:18080`
 - 原始 RTMP：`rtmp://127.0.0.1:1935/live/source`
 - 分析 RTMP：`rtmp://127.0.0.1:1935/live/analysis`
 
@@ -87,9 +87,9 @@ bash scripts/start_full_demo_stack.sh \
 
 ```bash
 bash scripts/start_full_demo_stack.sh \
-  /home/chenyu/workplace/tennis_analysis/input_videos/tennis.mp4 \
+  /home/chenyu/workplace/tennis_analysis/input_videos/youtube/youtube_match.mp4 \
   websocket \
-  8080 \
+  18080 \
   8765
 ```
 
@@ -101,20 +101,20 @@ bash scripts/start_full_demo_stack.sh \
 
 ```bash
 bash scripts/start_rtmp_source.sh \
-  /home/chenyu/workplace/tennis_analysis/input_videos/tennis.mp4
+  /home/chenyu/workplace/tennis_analysis/input_videos/youtube/youtube_match.mp4
 ```
 
 说明：
 
 - 这条命令会自动启动本地 `MediaMTX`
-- 会把 `tennis.mp4` 按实时节奏循环推到 `rtmp://127.0.0.1:1935/live/source`
+- 会把 `youtube_match.mp4` 按实时节奏循环推到 `rtmp://127.0.0.1:1935/live/source`
 - 只负责推流，不启动分析页面
 
 如果你想直接用 Python 命令启动：
 
 ```bash
 python services/rtmp_source_service.py \
-  --input /home/chenyu/workplace/tennis_analysis/input_videos/tennis.mp4 \
+  --input /home/chenyu/workplace/tennis_analysis/input_videos/youtube/youtube_match.mp4 \
   --rtmp-url rtmp://127.0.0.1:1935/live/source
 ```
 
@@ -129,7 +129,7 @@ bash scripts/start_demo.sh \
   rtmp://127.0.0.1:1935/live/source \
   /home/chenyu/workplace/tennis_analysis/models \
   sei \
-  8080 \
+  18080 \
   8765
 ```
 
@@ -149,7 +149,7 @@ python services/demo_app.py \
   --models-dir /home/chenyu/workplace/tennis_analysis/models \
   --pace-input-realtime \
   --overlay-mode sei \
-  --port 8080 \
+  --port 18080 \
   --ws-port 8765 \
   --analysis-rtmp-url rtmp://127.0.0.1:1935/live/analysis \
   --source-rtmp-url rtmp://127.0.0.1:1935/live/source \
@@ -158,7 +158,7 @@ python services/demo_app.py \
 
 启动后可访问：
 
-- Demo 页面：`http://127.0.0.1:8080`
+- Demo 页面：`http://127.0.0.1:18080`
 - 原始 RTMP：`rtmp://127.0.0.1:1935/live/source`
 - 分析 RTMP：`rtmp://127.0.0.1:1935/live/analysis`
 
@@ -166,7 +166,7 @@ python services/demo_app.py \
 
 - 前台启动时：在对应终端按 `Ctrl+C`
 - 如果是两个终端分开启动：推流终端和分析终端都需要各自停止一次
-- 若端口未释放，可检查 `1935`、`8080`、`8765` 是否仍被占用
+- 若端口未释放，可检查 `1935`、`18080`、`8765` 是否仍被占用
 - 也可以直接执行一键停止脚本：
 
 ```bash
@@ -179,7 +179,7 @@ bash scripts/stop_demo_stack.sh
 
 ```bash
 python services/rtmp_source_service.py \
-  --input input_videos/tennis.mp4 \
+  --input input_videos/youtube/youtube_match.mp4 \
   --rtmp-url rtmp://127.0.0.1:1935/live/source
 ```
 
@@ -205,7 +205,7 @@ python services/demo_app.py \
 - `--overlay-mode sei|websocket`
 - `--analysis-rtmp-url rtmp://127.0.0.1:1935/live/analysis`
 - `--source-rtmp-url rtmp://127.0.0.1:1935/live/source`
-- `--port 8080`
+- `--port 18080`
 - `--ws-port 8765`
 - `--analysis-fps 12`
 - `--output-fps 25`

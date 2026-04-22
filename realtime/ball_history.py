@@ -11,26 +11,42 @@ class BallHistoryBuffer:
         history_size: int = 45,
         trail_size: int = 10,
         max_gap_seconds: float = 0.5,
+        max_missing_frames: int = 2,
         confirm_window_seconds: float = 0.35,
         shot_cooldown_seconds: float = 0.45,
     ) -> None:
         self.history = deque(maxlen=history_size)
         self.trail = deque(maxlen=trail_size)
         self.max_gap_seconds = max_gap_seconds
+        self.max_missing_frames = max_missing_frames
         self.confirm_window_seconds = confirm_window_seconds
         self.shot_cooldown_seconds = shot_cooldown_seconds
         self.last_ball_box = None
         self.last_ball_pts = None
         self.last_shot_pts = None
+        self.missing_frames = 0
 
     def update(self, pts: float, ball_box):
         effective_box = ball_box
-        if ball_box is None and self.last_ball_box is not None and self.last_ball_pts is not None and pts - self.last_ball_pts <= self.max_gap_seconds:
+        if ball_box is None:
+            self.missing_frames += 1
+        else:
+            self.missing_frames = 0
+
+        if (
+            ball_box is None
+            and self.missing_frames <= self.max_missing_frames
+            and self.last_ball_box is not None
+            and self.last_ball_pts is not None
+            and pts - self.last_ball_pts <= self.max_gap_seconds
+        ):
             effective_box = self.last_ball_box
 
         if effective_box is None:
             self.history.append((pts, None))
             self.trail.clear()
+            self.last_ball_box = None
+            self.last_ball_pts = None
             return None, None, []
 
         center_y = (effective_box[1] + effective_box[3]) / 2.0

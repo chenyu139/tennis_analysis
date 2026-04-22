@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
-INPUT_VIDEO="${1:-$ROOT_DIR/input_videos/tennis.mp4}"
+INPUT_VIDEO="${1:-$ROOT_DIR/input_videos/youtube/youtube_match.mp4}"
 OVERLAY_MODE="${2:-sei}"
 HTTP_PORT="${3:-8080}"
 WS_PORT="${4:-8765}"

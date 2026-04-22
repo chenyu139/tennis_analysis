@@ -16,6 +16,9 @@ let wsMetadataByFrameId = new Map();
 let rawPlayer = null;
 let overlayPlayer = null;
 let activeShotFx = null;
+let playerRenderState = new Map();
+
+const SHOT_FX_DURATION_MS = 260;
 
 function renderPairs(root, data) {
   root.innerHTML = '';
@@ -176,6 +179,139 @@ function normalizeTrail(points) {
     .filter((point) => Array.isArray(point) && point.length >= 2)
     .map((point) => [Number(point[0]), Number(point[1])])
     .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+}
+
+function subdivideTrail(points) {
+  if (points.length < 3) {
+    return points.slice();
+  }
+  const refined = [points[0]];
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const current = points[index];
+    const next = points[index + 1];
+    const q = [
+      current[0] * 0.75 + next[0] * 0.25,
+      current[1] * 0.75 + next[1] * 0.25,
+    ];
+    const r = [
+      current[0] * 0.25 + next[0] * 0.75,
+      current[1] * 0.25 + next[1] * 0.75,
+    ];
+    refined.push(q, r);
+  }
+  refined.push(points[points.length - 1]);
+  return refined;
+}
+
+function smoothRenderTrail(ballTrail, ballBox) {
+  if (!ballTrail.length) {
+    return [];
+  }
+  let points = ballTrail.slice();
+  if (ballBox && points.length) {
+    points[points.length - 1] = [
+      (ballBox[0] + ballBox[2]) / 2,
+      (ballBox[1] + ballBox[3]) / 2,
+    ];
+  }
+  if (ballBox && points.length >= 2) {
+    const head = points[points.length - 1];
+    const prev = points[points.length - 2];
+    points = [
+      ...points.slice(0, -1),
+      [
+        prev[0] * 0.35 + head[0] * 0.65,
+        prev[1] * 0.35 + head[1] * 0.65,
+      ],
+      head,
+    ];
+  }
+  points = subdivideTrail(points);
+  points = subdivideTrail(points);
+  return points;
+}
+
+function predictBallHead(ballTrail, ballBox) {
+  const sourcePoints = ballTrail.length ? ballTrail : [];
+  const alignedHead = ballBox
+    ? [((ballBox[0] + ballBox[2]) / 2), ((ballBox[1] + ballBox[3]) / 2)]
+    : sourcePoints[sourcePoints.length - 1];
+  if (!alignedHead) {
+    return null;
+  }
+  if (sourcePoints.length < 2) {
+    return alignedHead;
+  }
+  const tail = sourcePoints[sourcePoints.length - 2];
+  const head = sourcePoints[sourcePoints.length - 1];
+  const velocityX = head[0] - tail[0];
+  const velocityY = head[1] - tail[1];
+  const speed = Math.hypot(velocityX, velocityY);
+  if (!Number.isFinite(speed) || speed < 2) {
+    return alignedHead;
+  }
+  const leadScale = Math.min(0.38, 0.14 + speed / 140);
+  return [
+    alignedHead[0] + velocityX * leadScale,
+    alignedHead[1] + velocityY * leadScale,
+  ];
+}
+
+function buildRenderedBallBox(ballBox, predictedHead) {
+  if (!ballBox) {
+    return null;
+  }
+  if (!predictedHead) {
+    return ballBox;
+  }
+  const [x1, y1, x2, y2] = ballBox;
+  const halfWidth = (x2 - x1) / 2;
+  const halfHeight = (y2 - y1) / 2;
+  return [
+    predictedHead[0] - halfWidth,
+    predictedHead[1] - halfHeight,
+    predictedHead[0] + halfWidth,
+    predictedHead[1] + halfHeight,
+  ];
+}
+
+function blendBox(fromBox, toBox, weight) {
+  return fromBox.map((value, index) => value * (1 - weight) + toBox[index] * weight);
+}
+
+function predictPlayerBox(box, previousRawBox) {
+  if (!previousRawBox) {
+    return box.slice();
+  }
+  const width = Math.max(box[2] - box[0], 1);
+  const height = Math.max(box[3] - box[1], 1);
+  const maxShiftX = width * 0.32;
+  const maxShiftY = height * 0.24;
+  return box.map((value, index) => {
+    const velocity = value - previousRawBox[index];
+    const maxShift = index % 2 === 0 ? maxShiftX : maxShiftY;
+    const predictedShift = Math.max(-maxShift, Math.min(maxShift, velocity * 0.22));
+    return value + predictedShift;
+  });
+}
+
+function getRenderedPlayerBox(playerId, box) {
+  const previous = playerRenderState.get(playerId) || null;
+  const predicted = predictPlayerBox(box, previous ? previous.rawBox : null);
+  const rendered = previous ? blendBox(previous.renderedBox, predicted, 0.72) : predicted;
+  playerRenderState.set(playerId, {
+    rawBox: box.slice(),
+    renderedBox: rendered.slice(),
+  });
+  return rendered;
+}
+
+function prunePlayerRenderState(activePlayerIds) {
+  [...playerRenderState.keys()].forEach((playerId) => {
+    if (!activePlayerIds.has(playerId)) {
+      playerRenderState.delete(playerId);
+    }
+  });
 }
 
 function traceSmoothTrail(ctx, points) {
@@ -362,11 +498,11 @@ function getShotBoost() {
     return 0;
   }
   const ageMs = performance.now() - activeShotFx.startedAt;
-  if (ageMs >= 320) {
+  if (ageMs >= SHOT_FX_DURATION_MS) {
     activeShotFx = null;
     return 0;
   }
-  return 1 - ageMs / 320;
+  return 1 - ageMs / SHOT_FX_DURATION_MS;
 }
 
 function drawShotBurst(ctx, effect, boost) {
@@ -497,12 +633,14 @@ function drawOverlay(ctx, canvas, metadata) {
   }
 
   const playerBoxes = metadata.player_boxes || {};
+  const activePlayerIds = new Set();
   Object.entries(playerBoxes).forEach(([playerId, box]) => {
     const normalized = normalizeBox(box);
     if (!normalized) {
       return;
     }
-    const [x1, y1, x2, y2] = normalized;
+    activePlayerIds.add(String(playerId));
+    const [x1, y1, x2, y2] = getRenderedPlayerBox(String(playerId), normalized);
     const footX = (x1 + x2) / 2;
     const footY = y2;
     ctx.strokeStyle = '#ffffff';
@@ -514,18 +652,25 @@ function drawOverlay(ctx, canvas, metadata) {
     ctx.font = '20px Arial';
     ctx.fillText(`P${playerId}`, x1, Math.max(y1 - 10, 24));
   });
+  prunePlayerRenderState(activePlayerIds);
 
   const ballBox = normalizeBox(metadata.ball_box);
-  const ballTrail = normalizeTrail(metadata.ball_trail);
+  const rawBallTrail = normalizeTrail(metadata.ball_trail);
+  const predictedBallHead = predictBallHead(rawBallTrail, ballBox);
+  const ballTrail = smoothRenderTrail(rawBallTrail, ballBox);
+  if (predictedBallHead && ballTrail.length) {
+    ballTrail[ballTrail.length - 1] = predictedBallHead;
+  }
+  const renderedBallBox = buildRenderedBallBox(ballBox, predictedBallHead);
   const effect = getSelectedEffect();
-  markShotEffect(metadata, ballBox, ballTrail);
+  markShotEffect(metadata, renderedBallBox, ballTrail);
   const shotBoost = getShotBoost();
   if (ballTrail.length >= 2) {
     drawTrailByEffect(ctx, ballTrail, effect, shotBoost);
   }
 
-  if (ballBox) {
-    const [x1, y1, x2, y2] = ballBox;
+  if (renderedBallBox) {
+    const [x1, y1, x2, y2] = renderedBallBox;
     const centerX = (x1 + x2) / 2;
     const centerY = (y1 + y2) / 2;
     const radius = Math.max((x2 - x1) / 2, 6);
@@ -737,6 +882,8 @@ function stopPlayers() {
     overlayPlayer.close();
     overlayPlayer = null;
   }
+  playerRenderState = new Map();
+  activeShotFx = null;
 }
 
 function connectWebSocket(sessionId) {

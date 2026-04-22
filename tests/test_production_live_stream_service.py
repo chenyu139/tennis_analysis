@@ -33,6 +33,18 @@ class StaticBallDetector:
         return {1: [140, 100 + (self.calls % 3) * 10, 150, 110 + (self.calls % 3) * 10]}
 
 
+class SequenceBallDetector:
+    def __init__(self, detections):
+        self.detections = list(detections)
+        self.calls = 0
+
+    def detect(self, image):
+        del image
+        index = min(self.calls, len(self.detections) - 1)
+        self.calls += 1
+        return self.detections[index]
+
+
 class StaticCourtDetector:
     def predict(self, image):
         height, width = image.shape[:2]
@@ -314,6 +326,44 @@ class ProductionLiveStreamServiceTests(unittest.TestCase):
         expected_center_y = (ball_box[1] + ball_box[3]) / 2.0
         self.assertAlmostEqual(overlay.ball_trail[-1][0], expected_center_x)
         self.assertAlmostEqual(overlay.ball_trail[-1][1], expected_center_y)
+
+    def test_analysis_pipeline_clears_ball_after_consecutive_misses(self):
+        temp_dir = tempfile.mkdtemp(prefix='tennis_pipeline_ball_cut_test_')
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        config = PipelineConfig(
+            analysis_fps=25.0,
+            output_fps=25.0,
+            ball_max_missing_frames=2,
+            metrics_path=os.path.join(temp_dir, 'live_metrics.json'),
+            status_path=os.path.join(temp_dir, 'live_packet.json'),
+        )
+        state_store = LiveStateStore()
+        pipeline = RealtimeAnalysisPipeline(
+            config=config,
+            state_store=state_store,
+            player_detector=StaticPlayerDetector(),
+            ball_detector=SequenceBallDetector([
+                {1: [140, 100, 150, 110]},
+                {},
+                {},
+                {},
+            ]),
+            court_detector=StaticCourtDetector(),
+        )
+
+        overlays = []
+        for frame_id in range(1, 5):
+            overlays.append(
+                pipeline.process_frame(
+                    type('Frame', (), {'frame_id': frame_id, 'pts': frame_id / 25.0, 'image': frame})(),
+                    queue_size=0,
+                )
+            )
+
+        self.assertIsNotNone(overlays[1].ball_box)
+        self.assertGreaterEqual(len(overlays[1].ball_trail), 1)
+        self.assertIsNone(overlays[3].ball_box)
+        self.assertEqual(overlays[3].ball_trail, [])
 
     def test_analysis_pipeline_does_not_fallback_to_side_people(self):
         temp_dir = tempfile.mkdtemp(prefix='tennis_pipeline_no_side_fallback_test_')

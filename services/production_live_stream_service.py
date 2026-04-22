@@ -226,7 +226,7 @@ def parse_args():
     parser.add_argument('--ball-model', default=None, help='Optional tennis ball detector model path.')
     parser.add_argument('--court-model', default=None, help='Optional court keypoint model path.')
     parser.add_argument('--models-dir', default='models', help='Directory containing all required model weights.')
-    parser.add_argument('--analysis-fps', type=float, default=15.0)
+    parser.add_argument('--analysis-fps', type=float, default=20.0)
     parser.add_argument('--output-fps', type=float, default=25.0)
     parser.add_argument('--queue-size', type=int, default=8)
     parser.add_argument('--metrics-path', default='runtime/live_metrics.json')
