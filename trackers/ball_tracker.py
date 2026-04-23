@@ -1,18 +1,33 @@
-from ultralytics import YOLO 
+from pathlib import Path
+
+from ultralytics import RTDETR, YOLO
 import cv2
 import pickle
 import pandas as pd
 import numpy as np
 
 class BallTracker:
-    def __init__(self,model_path, device=None):
+    def __init__(self,model_path, device=None, detector_type='auto'):
         self.model_path = model_path
         self.model = None
         self.device = device
+        self.detector_type = self._resolve_detector_type(detector_type, model_path)
+        self.last_ball_box = None
+        self.missing_frames = 0
+
+    def _resolve_detector_type(self, detector_type, model_path):
+        normalized = str(detector_type or 'auto').strip().lower()
+        if normalized in {'yolo', 'rtdetr'}:
+            return normalized
+        model_name = Path(str(model_path)).name.lower()
+        if 'rtdetr' in model_name:
+            return 'rtdetr'
+        return 'yolo'
 
     def _ensure_model(self):
         if self.model is None:
-            self.model = YOLO(self.model_path)
+            model_cls = RTDETR if self.detector_type == 'rtdetr' else YOLO
+            self.model = model_cls(self.model_path)
             if self.device is not None:
                 try:
                     self.model.to(self.device)
@@ -97,12 +112,21 @@ class BallTracker:
 
     def detect_frame(self,frame):
         self._ensure_model()
-        predict_kwargs = {
-            'conf': 0.22,
-            'iou': 0.35,
-            'max_det': 1,
-            'verbose': False,
-        }
+        frame_h, frame_w = frame.shape[:2]
+        if self.detector_type == 'rtdetr':
+            predict_kwargs = {
+                'conf': 0.36,
+                'iou': 0.22,
+                'max_det': 6,
+                'verbose': False,
+            }
+        else:
+            predict_kwargs = {
+                'conf': 0.22,
+                'iou': 0.35,
+                'max_det': 3,
+                'verbose': False,
+            }
         if self.device is not None:
             predict_kwargs['device'] = self.device
             if str(self.device).startswith('cuda'):
@@ -111,14 +135,56 @@ class BallTracker:
 
         ball_dict = {}
         best_box = None
-        best_conf = -1.0
+        best_score = float('-inf')
+        max_box_side = max(14.0, min(frame_w, frame_h) * (0.034 if self.detector_type == 'rtdetr' else 0.05))
+        max_box_area = frame_w * frame_h * (0.0012 if self.detector_type == 'rtdetr' else 0.0020)
+        max_jump = max(frame_w, frame_h) * (0.23 if self.detector_type == 'rtdetr' else 0.32)
         for box in results.boxes:
             confidence = float(box.conf.tolist()[0]) if box.conf is not None else 0.0
-            if confidence > best_conf:
-                best_conf = confidence
-                best_box = box.xyxy.tolist()[0]
+            candidate_box = box.xyxy.tolist()[0]
+            x1, y1, x2, y2 = candidate_box
+            width = max(float(x2 - x1), 0.0)
+            height = max(float(y2 - y1), 0.0)
+            if width < 2.0 or height < 2.0:
+                continue
+            if max(width, height) > max_box_side:
+                continue
+            if width * height > max_box_area:
+                continue
+            aspect_ratio = max(width / max(height, 1e-6), height / max(width, 1e-6))
+            if aspect_ratio > (2.3 if self.detector_type == 'rtdetr' else 2.4):
+                continue
+
+            score = confidence
+            if self.last_ball_box is not None:
+                prev_x1, prev_y1, prev_x2, prev_y2 = self.last_ball_box
+                prev_center_x = (prev_x1 + prev_x2) / 2.0
+                prev_center_y = (prev_y1 + prev_y2) / 2.0
+                center_x = (x1 + x2) / 2.0
+                center_y = (y1 + y2) / 2.0
+                jump_distance = float(np.hypot(center_x - prev_center_x, center_y - prev_center_y))
+                if jump_distance > max_jump:
+                    continue
+                if self.detector_type == 'rtdetr' and jump_distance > max_jump * 0.8 and confidence < 0.48:
+                    continue
+                score -= jump_distance / max(max_jump, 1.0) * (0.38 if self.detector_type == 'rtdetr' else 0.35)
+
+                prev_area = max((prev_x2 - prev_x1) * (prev_y2 - prev_y1), 1.0)
+                area_ratio = (width * height) / prev_area
+                if area_ratio > (3.2 if self.detector_type == 'rtdetr' else 3.5) or area_ratio < (0.25 if self.detector_type == 'rtdetr' else 0.2):
+                    score -= 0.12 if self.detector_type == 'rtdetr' else 0.15
+
+            if score > best_score:
+                best_score = score
+                best_box = candidate_box
         if best_box is not None:
             ball_dict[1] = best_box
+            self.last_ball_box = best_box
+            self.missing_frames = 0
+        else:
+            self.missing_frames += 1
+            if self.missing_frames > 2:
+                self.last_ball_box = None
         del results  # FIX: 每帧推理后显式释放检测结果对象，减少长视频处理时内存滞留
         
         return ball_dict

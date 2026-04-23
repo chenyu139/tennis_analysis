@@ -3,6 +3,7 @@ const rawCtx = rawCanvas.getContext('2d');
 const overlayCanvas = document.getElementById('overlay-canvas');
 const overlayCtx = overlayCanvas.getContext('2d');
 const modeSelect = document.getElementById('mode-select');
+const ballDetectorSelect = document.getElementById('ball-detector-select');
 const effectSelect = document.getElementById('effect-select');
 const overlayRoot = document.getElementById('overlay-status');
 const metricsRoot = document.getElementById('metrics');
@@ -40,6 +41,24 @@ function getSelectedMode() {
 
 function getSelectedEffect() {
   return effectSelect && effectSelect.value ? effectSelect.value : 'smooth';
+}
+
+function configureBallDetectorOptions() {
+  if (!ballDetectorSelect) {
+    return;
+  }
+  const availableDetectors = Array.isArray(runtimeConfig.available_ball_detectors) && runtimeConfig.available_ball_detectors.length
+    ? runtimeConfig.available_ball_detectors
+    : [{ key: 'yolo', label: 'YOLO' }];
+  ballDetectorSelect.innerHTML = '';
+  availableDetectors.forEach((detector) => {
+    const option = document.createElement('option');
+    option.value = detector.key;
+    option.textContent = detector.label || detector.key;
+    ballDetectorSelect.appendChild(option);
+  });
+  ballDetectorSelect.value = runtimeConfig.ball_detector || availableDetectors[0].key;
+  ballDetectorSelect.disabled = availableDetectors.length <= 1;
 }
 
 function configureModeOptions() {
@@ -984,6 +1003,7 @@ async function refreshPanels() {
     ...overlay,
     source_rtmp: runtime.source_rtmp_url || 'n/a',
     analysis_rtmp: runtime.analysis_rtmp_url || 'n/a',
+    ball_detector: runtime.ball_detector || 'yolo',
     effect: getSelectedEffect(),
   });
 }
@@ -992,6 +1012,30 @@ async function loadRuntimeConfig() {
   const response = await fetch('/api/runtime', { cache: 'no-store' });
   runtimeConfig = await response.json();
   configureModeOptions();
+  configureBallDetectorOptions();
+}
+
+async function switchBallDetector() {
+  if (!runtimeConfig || !ballDetectorSelect) {
+    return;
+  }
+  const response = await fetch('/api/runtime', {
+    method: 'POST',
+    cache: 'no-store',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      ball_detector: ballDetectorSelect.value,
+    }),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error || '切换球检测器失败');
+  }
+  runtimeConfig = payload;
+  configureModeOptions();
+  configureBallDetectorOptions();
 }
 
 async function startPlayback() {
@@ -1056,6 +1100,21 @@ modeSelect.addEventListener('change', () => {
   }
   startPlayback();
 });
+
+if (ballDetectorSelect) {
+  ballDetectorSelect.addEventListener('change', async () => {
+    try {
+      await switchBallDetector();
+      await startPlayback();
+      await refreshPanels();
+    } catch (error) {
+      console.error(error);
+      renderPairs(overlayRoot, { error: `切换球检测失败: ${String(error)}` });
+      await loadRuntimeConfig();
+      await refreshPanels();
+    }
+  });
+}
 
 if (effectSelect) {
   effectSelect.addEventListener('change', refreshPanels);

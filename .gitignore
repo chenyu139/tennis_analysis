@@ -8,6 +8,7 @@ __pycache__
 *.avi
 *.mp4
 output_videos/*
+runtime/*
 *.iml
 *.log
 .idea/

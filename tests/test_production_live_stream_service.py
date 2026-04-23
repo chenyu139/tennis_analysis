@@ -3,7 +3,7 @@ import os
 import tempfile
 import threading
 import unittest
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 import numpy as np
 
@@ -49,6 +49,27 @@ class StaticCourtDetector:
     def predict(self, image):
         height, width = image.shape[:2]
         return [30, 30, width - 30, 30, 30, height - 30, width - 30, height - 30, 70, 30, 70, height - 30, width - 70, 30, width - 70, height - 30, 90, 80, width - 90, 80, 90, height - 80, width - 90, height - 80, width // 2, 80, width // 2, height - 80]
+
+
+class RuntimeControllerStub:
+    def __init__(self):
+        self.ball_detector = 'yolo'
+
+    def get_runtime_state(self):
+        return {
+            'ball_detector': self.ball_detector,
+            'available_ball_detectors': [
+                {'key': 'yolo', 'label': 'YOLO', 'detector_type': 'yolo', 'model_path': '/tmp/yolo.pt'},
+                {'key': 'rtdetr', 'label': 'RT-DETR', 'detector_type': 'rtdetr', 'model_path': '/tmp/rtdetr.pt'},
+            ],
+        }
+
+    def switch_ball_detector(self, detector_key):
+        normalized = str(detector_key).strip().lower()
+        if normalized not in {'yolo', 'rtdetr'}:
+            raise ValueError(f'Unsupported ball detector "{detector_key}"')
+        self.ball_detector = normalized
+        return self.get_runtime_state()
 
 
 class AudienceHeavyPlayerDetector:
@@ -500,6 +521,7 @@ class DemoServerTests(unittest.TestCase):
         state_store = LiveStateStore()
         analysis_transport_hub = TransportHub()
         raw_transport_hub = TransportHub()
+        runtime_controller = RuntimeControllerStub()
         handler = build_handler(
             state_store,
             analysis_transport_hub,
@@ -508,6 +530,7 @@ class DemoServerTests(unittest.TestCase):
             ws_port=None,
             source_rtmp_url='rtmp://127.0.0.1:1935/live/source',
             analysis_rtmp_url='rtmp://127.0.0.1:1935/live/analysis',
+            runtime_controller=runtime_controller,
         )
         server = ThreadingHTTPServer(('127.0.0.1', 0), handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -523,6 +546,8 @@ class DemoServerTests(unittest.TestCase):
             self.assertIsNone(runtime['ws_url'])
             self.assertEqual(runtime['source_rtmp_url'], 'rtmp://127.0.0.1:1935/live/source')
             self.assertEqual(runtime['analysis_rtmp_url'], 'rtmp://127.0.0.1:1935/live/analysis')
+            self.assertEqual(runtime['ball_detector'], 'yolo')
+            self.assertEqual(len(runtime['available_ball_detectors']), 2)
         finally:
             server.shutdown()
             server.server_close()
@@ -538,6 +563,7 @@ class DemoServerTests(unittest.TestCase):
         access_unit = build_sei_nal(metadata) + b'\x00\x00\x00\x01\x09\xf0'
         analysis_transport_hub.publish(sequence_id=1, annexb_bytes=access_unit, metadata=metadata, is_keyframe=True)
         raw_transport_hub.publish(sequence_id=1, annexb_bytes=b'\x00\x00\x00\x01\x09\xf0', metadata=metadata, is_keyframe=True)
+        runtime_controller = RuntimeControllerStub()
         handler = build_handler(
             state_store,
             analysis_transport_hub,
@@ -546,6 +572,7 @@ class DemoServerTests(unittest.TestCase):
             ws_port=8765,
             source_rtmp_url='rtmp://127.0.0.1:1935/live/source',
             analysis_rtmp_url='rtmp://127.0.0.1:1935/live/analysis',
+            runtime_controller=runtime_controller,
         )
         server = ThreadingHTTPServer(('127.0.0.1', 0), handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -560,6 +587,41 @@ class DemoServerTests(unittest.TestCase):
             self.assertEqual(runtime['overlay_mode'], 'websocket')
             self.assertEqual(runtime['available_modes'], ['sei', 'websocket'])
             self.assertTrue(runtime['ws_url'].endswith(':8765/overlay'))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_demo_handler_switches_ball_detector(self):
+        from http.server import ThreadingHTTPServer
+
+        state_store = LiveStateStore()
+        analysis_transport_hub = TransportHub()
+        raw_transport_hub = TransportHub()
+        runtime_controller = RuntimeControllerStub()
+        handler = build_handler(
+            state_store,
+            analysis_transport_hub,
+            raw_transport_hub,
+            PipelineConfig(overlay_mode='sei'),
+            ws_port=None,
+            source_rtmp_url='rtmp://127.0.0.1:1935/live/source',
+            analysis_rtmp_url='rtmp://127.0.0.1:1935/live/analysis',
+            runtime_controller=runtime_controller,
+        )
+        server = ThreadingHTTPServer(('127.0.0.1', 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            request = Request(
+                f'http://127.0.0.1:{server.server_port}/api/runtime',
+                data=json.dumps({'ball_detector': 'rtdetr'}).encode('utf-8'),
+                headers={'Content-Type': 'application/json'},
+                method='POST',
+            )
+            runtime = json.loads(urlopen(request).read().decode('utf-8'))
+            self.assertEqual(runtime['ball_detector'], 'rtdetr')
+            self.assertEqual(runtime_controller.ball_detector, 'rtdetr')
         finally:
             server.shutdown()
             server.server_close()

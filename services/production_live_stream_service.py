@@ -14,7 +14,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from realtime.analysis_pipeline import RealtimeAnalysisPipeline
 from services.h264_sei import EncodedAccessUnit, H264SeiEncoder, inject_sei
-from services.live_stream_service import build_default_detectors, resolve_runtime_device
+from services.live_stream_service import build_ball_detector, build_default_detectors, resolve_runtime_device
 from services.transport_hub import TransportHub
 from streaming import (
     LiveStateStore,
@@ -36,6 +36,8 @@ class ProductionLiveStreamService:
         state_store: LiveStateStore,
         analysis_transport_hub: TransportHub,
         raw_transport_hub: TransportHub | None = None,
+        ball_detector_options: dict[str, dict[str, str]] | None = None,
+        device: str | None = None,
     ) -> None:
         self.ingress = ingress
         self.decoder = StreamDecoder(ingress)
@@ -44,6 +46,8 @@ class ProductionLiveStreamService:
         self.state_store = state_store
         self.analysis_transport_hub = analysis_transport_hub
         self.raw_transport_hub = raw_transport_hub or TransportHub()
+        self.ball_detector_options = dict(ball_detector_options or {})
+        self.device = device
         self.raw_encoder = H264SeiEncoder(fps=config.output_fps, inject_metadata=False)
         self.frame_queue = Queue(maxsize=max(config.ingest_queue_size, 1))
         self.stop_event = threading.Event()
@@ -54,6 +58,30 @@ class ProductionLiveStreamService:
         self._error = None
         self._reader_started_at = None
         self._max_frames: int | None = None
+
+    def get_runtime_state(self) -> dict:
+        options = []
+        for key, option in self.ball_detector_options.items():
+            options.append({
+                'key': key,
+                'label': option.get('label', key.upper()),
+                'detector_type': option.get('detector_type', key),
+                'model_path': option.get('model_path'),
+            })
+        return {
+            'ball_detector': getattr(self.config, 'ball_detector_type', 'yolo'),
+            'available_ball_detectors': options,
+        }
+
+    def switch_ball_detector(self, detector_key: str) -> dict:
+        normalized = str(detector_key or '').strip().lower()
+        if normalized not in self.ball_detector_options:
+            available = ', '.join(sorted(self.ball_detector_options))
+            raise ValueError(f'Unsupported ball detector "{detector_key}". Available: {available}')
+        detector = build_ball_detector(self.ball_detector_options[normalized], device=self.device)
+        self.analysis_pipeline.set_ball_detector(detector, normalized)
+        self.config.ball_detector_type = normalized
+        return self.get_runtime_state()
 
     def _enqueue_frame(self, video_frame) -> None:
         try:
@@ -232,12 +260,14 @@ def parse_args():
     parser.add_argument('--metrics-path', default='runtime/live_metrics.json')
     parser.add_argument('--status-path', default='runtime/live_packet.json')
     parser.add_argument('--device', default='cuda:0', help='GPU device, e.g. cuda:0.')
+    parser.add_argument('--ball-detector', choices=('yolo', 'rtdetr'), default='yolo', help='Active tennis ball detector backend.')
     parser.add_argument('--pace-input-realtime', action='store_true', help='Throttle file input to match source timestamps.')
     parser.add_argument('--disable-stats', action='store_true')
     parser.add_argument('--disable-mini-court', action='store_true')
     parser.add_argument('--render-court-keypoints', action='store_true')
     parser.add_argument('--overlay-mode', choices=('sei', 'websocket'), default='sei', help='Client overlay mode to expose in demo runtime config.')
     parser.add_argument('--max-frames', type=int, default=None, help='Stop after processing the given number of output frames.')
+    parser.add_argument('--rtdetr-ball-model', default=None, help='Optional RT-DETR tennis ball detector model path.')
     return parser.parse_args()
 
 
@@ -258,14 +288,17 @@ def build_service_from_args(
         metrics_path=args.metrics_path,
         status_path=args.status_path,
         overlay_mode=args.overlay_mode,
+        ball_detector_type=args.ball_detector,
     )
     state_store = LiveStateStore()
-    player_detector, ball_detector, court_detector = build_default_detectors(
+    player_detector, ball_detector, court_detector, ball_detector_options = build_default_detectors(
         models_dir=args.models_dir,
         player_model_path=args.player_model,
         ball_model_path=args.ball_model,
         court_model_path=args.court_model,
         device=device,
+        ball_detector_type=args.ball_detector,
+        rtdetr_ball_model_path=args.rtdetr_ball_model,
     )
     analysis_pipeline = RealtimeAnalysisPipeline(
         config=config,
@@ -278,7 +311,16 @@ def build_service_from_args(
     ingress = ingress_cls(args.input, fps_hint=config.output_fps)
     analysis_hub = analysis_transport_hub or TransportHub()
     raw_hub = raw_transport_hub or TransportHub()
-    return ProductionLiveStreamService(ingress, analysis_pipeline, config, state_store, analysis_hub, raw_hub)
+    return ProductionLiveStreamService(
+        ingress,
+        analysis_pipeline,
+        config,
+        state_store,
+        analysis_hub,
+        raw_hub,
+        ball_detector_options=ball_detector_options,
+        device=device,
+    )
 
 
 def main():

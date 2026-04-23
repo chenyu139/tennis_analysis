@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from threading import Lock
 
 from mini_court import MiniCourt
 from utils import get_center_of_bbox, get_foot_position, measure_distance
@@ -58,6 +59,7 @@ class RealtimeAnalysisPipeline:
         self.player_detector = player_detector
         self.ball_detector = ball_detector
         self.court_detector = court_detector
+        self._ball_detector_lock = Lock()
         self.player_state = PlayerTrackState(history_size=config.player_history_size)
         self.ball_history = BallHistoryBuffer(
             history_size=config.ball_history_size,
@@ -131,8 +133,10 @@ class RealtimeAnalysisPipeline:
 
         ball_started = time.perf_counter()
         try:
-            if self.ball_detector is not None:
-                ball_box = self._select_ball_box(self._detect_ball(video_frame.image))
+            ball_detector, ball_detector_type = self.get_ball_detector()
+            if ball_detector is not None:
+                ball_box = self._select_ball_box(self._detect_ball(video_frame.image, ball_detector))
+                debug['ball_detector'] = ball_detector_type
         except Exception as exc:
             if status == 'ok':
                 status = 'ball_error'
@@ -195,11 +199,24 @@ class RealtimeAnalysisPipeline:
             return self.player_detector.detect_frame(image)
         raise TypeError('Unsupported player detector interface')
 
-    def _detect_ball(self, image):
-        if hasattr(self.ball_detector, 'detect'):
-            return self.ball_detector.detect(image)
-        if hasattr(self.ball_detector, 'detect_frame'):
-            return self.ball_detector.detect_frame(image)
+    def set_ball_detector(self, detector, detector_type: str | None = None):
+        with self._ball_detector_lock:
+            self.ball_detector = detector
+            if detector_type:
+                self.config.ball_detector_type = detector_type
+
+    def get_ball_detector(self):
+        with self._ball_detector_lock:
+            return self.ball_detector, getattr(self.config, 'ball_detector_type', 'yolo')
+
+    def _detect_ball(self, image, detector=None):
+        active_detector = detector
+        if active_detector is None:
+            active_detector, _detector_type = self.get_ball_detector()
+        if hasattr(active_detector, 'detect'):
+            return active_detector.detect(image)
+        if hasattr(active_detector, 'detect_frame'):
+            return active_detector.detect_frame(image)
         raise TypeError('Unsupported ball detector interface')
 
     def _detect_court(self, image):

@@ -27,6 +27,7 @@ def parse_args():
     parser.add_argument('--output-fps', type=float, default=25.0)
     parser.add_argument('--queue-size', type=int, default=8)
     parser.add_argument('--device', default='cuda:0')
+    parser.add_argument('--ball-detector', choices=('yolo', 'rtdetr'), default='yolo')
     parser.add_argument('--metrics-path', default='runtime/live_metrics.json')
     parser.add_argument('--status-path', default='runtime/live_packet.json')
     parser.add_argument('--pace-input-realtime', action='store_true')
@@ -36,6 +37,7 @@ def parse_args():
     parser.add_argument('--overlay-mode', choices=('sei', 'websocket'), default='sei')
     parser.add_argument('--player-model', default=None)
     parser.add_argument('--ball-model', default=None)
+    parser.add_argument('--rtdetr-ball-model', default=None)
     parser.add_argument('--court-model', default=None)
     parser.add_argument('--analysis-rtmp-url', default='rtmp://127.0.0.1:1935/live/analysis')
     parser.add_argument('--source-rtmp-url', default='rtmp://127.0.0.1:1935/live/source')
@@ -75,6 +77,7 @@ def main():
             ws_port=args.ws_port if ws_server is not None else None,
             source_rtmp_url=args.source_rtmp_url,
             analysis_rtmp_url=args.analysis_rtmp_url,
+            runtime_controller=service,
         )
     finally:
         analysis_publisher.stop()

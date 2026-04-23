@@ -24,6 +24,7 @@ class DemoRequestHandler(BaseHTTPRequestHandler):
     config = None
     source_rtmp_url = None
     analysis_rtmp_url = None
+    runtime_controller = None
 
     def _send_bytes(self, payload: bytes, content_type: str, status: int = 200):
         self.send_response(status)
@@ -36,6 +37,27 @@ class DemoRequestHandler(BaseHTTPRequestHandler):
     def _send_json(self, data: dict, status: int = 200):
         payload = json.dumps(data).encode('utf-8')
         self._send_bytes(payload, 'application/json; charset=utf-8', status=status)
+
+    def _build_runtime_payload(self):
+        host = self.headers.get('Host', '127.0.0.1').split(':')[0]
+        overlay_mode = getattr(self.config, 'overlay_mode', 'sei')
+        runtime_payload = {
+            'overlay_mode': overlay_mode,
+            'available_modes': ['sei', 'websocket'] if self.ws_port is not None else ['sei'],
+            'ws_url': f'ws://{host}:{self.ws_port}/overlay' if self.ws_port is not None else None,
+            'raw_stream_url': '/stream/raw.h264',
+            'analysis_stream_url': '/stream/analysis.h264',
+            'source_rtmp_url': self.source_rtmp_url,
+            'analysis_rtmp_url': self.analysis_rtmp_url,
+            'title': self.config.demo_title,
+            'fps': self.config.output_fps,
+            'ball_detector': getattr(self.config, 'ball_detector_type', 'yolo'),
+            'available_ball_detectors': [],
+        }
+        if self.runtime_controller is not None and hasattr(self.runtime_controller, 'get_runtime_state'):
+            controller_state = self.runtime_controller.get_runtime_state()
+            runtime_payload.update(controller_state)
+        return runtime_payload
 
     def _serve_h264_stream(self, transport_hub):
         self.send_response(200)
@@ -83,19 +105,7 @@ class DemoRequestHandler(BaseHTTPRequestHandler):
             })
             return
         if route == '/api/runtime':
-            host = self.headers.get('Host', '127.0.0.1').split(':')[0]
-            overlay_mode = getattr(self.config, 'overlay_mode', 'sei')
-            self._send_json({
-                'overlay_mode': overlay_mode,
-                'available_modes': ['sei', 'websocket'] if self.ws_port is not None else ['sei'],
-                'ws_url': f'ws://{host}:{self.ws_port}/overlay' if self.ws_port is not None else None,
-                'raw_stream_url': '/stream/raw.h264',
-                'analysis_stream_url': '/stream/analysis.h264',
-                'source_rtmp_url': self.source_rtmp_url,
-                'analysis_rtmp_url': self.analysis_rtmp_url,
-                'title': self.config.demo_title,
-                'fps': self.config.output_fps,
-            })
+            self._send_json(self._build_runtime_payload())
             return
         if route == '/stream/raw.h264':
             self._serve_h264_stream(self.raw_transport_hub)
@@ -104,6 +114,42 @@ class DemoRequestHandler(BaseHTTPRequestHandler):
             self._serve_h264_stream(self.analysis_transport_hub)
             return
         self._send_json({'error': 'not found'}, status=404)
+
+    def do_POST(self):
+        route = urlparse(self.path).path
+        if route != '/api/runtime':
+            self._send_json({'error': 'not found'}, status=404)
+            return
+
+        if self.runtime_controller is None or not hasattr(self.runtime_controller, 'switch_ball_detector'):
+            self._send_json({'error': 'runtime control unavailable'}, status=503)
+            return
+
+        content_length = int(self.headers.get('Content-Length', '0') or 0)
+        body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+        try:
+            payload = json.loads(body.decode('utf-8') or '{}')
+        except json.JSONDecodeError:
+            self._send_json({'error': 'invalid json'}, status=400)
+            return
+
+        detector_key = payload.get('ball_detector')
+        if not detector_key:
+            self._send_json({'error': 'ball_detector is required'}, status=400)
+            return
+
+        try:
+            runtime_state = self.runtime_controller.switch_ball_detector(detector_key)
+        except ValueError as exc:
+            self._send_json({'error': str(exc)}, status=400)
+            return
+        except Exception as exc:
+            self._send_json({'error': str(exc)}, status=500)
+            return
+
+        response = self._build_runtime_payload()
+        response.update(runtime_state)
+        self._send_json(response)
 
 
 def build_handler(
@@ -114,6 +160,7 @@ def build_handler(
     ws_port: int | None,
     source_rtmp_url: str | None,
     analysis_rtmp_url: str | None,
+    runtime_controller=None,
 ):
     class BoundDemoRequestHandler(DemoRequestHandler):
         pass
@@ -125,6 +172,7 @@ def build_handler(
     BoundDemoRequestHandler.ws_port = ws_port
     BoundDemoRequestHandler.source_rtmp_url = source_rtmp_url
     BoundDemoRequestHandler.analysis_rtmp_url = analysis_rtmp_url
+    BoundDemoRequestHandler.runtime_controller = runtime_controller
     return BoundDemoRequestHandler
 
 
@@ -138,6 +186,7 @@ def run_demo_server(
     ws_port: int | None = 8765,
     source_rtmp_url: str | None = None,
     analysis_rtmp_url: str | None = None,
+    runtime_controller=None,
 ):
     server = ThreadingHTTPServer(
         (host, port),
@@ -149,6 +198,7 @@ def run_demo_server(
             ws_port,
             source_rtmp_url,
             analysis_rtmp_url,
+            runtime_controller,
         ),
     )
     print(f'Demo server listening on http://{host}:{port}')

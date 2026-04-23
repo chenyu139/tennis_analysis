@@ -28,6 +28,7 @@ class PipelineConfig:
     status_path: str = 'runtime/live_packet.json'
     demo_title: str = 'Tennis Live Analysis Demo'
     overlay_mode: str = 'sei'
+    ball_detector_type: str = 'yolo'
 
     def ensure_runtime_dirs(self) -> None:
         for path_str in (self.metrics_path, self.status_path):
