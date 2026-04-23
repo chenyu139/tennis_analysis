@@ -401,52 +401,117 @@ function drawCometTrail(ctx, points, boost = 0) {
   ctx.restore();
 }
 
-function drawArcadeTrail(ctx, points, boost = 0) {
+function drawFlameTrail(ctx, points, boost = 0) {
   if (points.length < 2) {
     return;
   }
   ctx.save();
-  points.forEach((point, index) => {
-    const alpha = (index + 1) / points.length;
-    const hue = 20 + alpha * 70;
-    ctx.fillStyle = `hsla(${hue}, 100%, 60%, ${0.16 + alpha * 0.42})`;
-    ctx.beginPath();
-    ctx.arc(point[0], point[1], 4 + alpha * 9 + boost * 3, 0, Math.PI * 2);
-    ctx.fill();
-  });
-  ctx.setLineDash([8, 10]);
+  ctx.globalCompositeOperation = 'screen';
   ctx.lineCap = 'round';
-  ctx.shadowBlur = 16 + boost * 8;
-  ctx.shadowColor = 'rgba(255, 120, 0, 0.36)';
-  ctx.strokeStyle = `rgba(255, 210, 0, ${0.35 + boost * 0.15})`;
-  ctx.lineWidth = 6 + boost * 3;
+  ctx.lineJoin = 'round';
+
+  ctx.shadowBlur = 30 + boost * 14;
+  ctx.shadowColor = 'rgba(255, 82, 18, 0.48)';
+  ctx.strokeStyle = `rgba(255, 72, 18, ${0.22 + boost * 0.16})`;
+  ctx.lineWidth = 24 + boost * 8;
   traceSmoothTrail(ctx, points);
   ctx.stroke();
+
+  ctx.shadowBlur = 18 + boost * 10;
+  ctx.shadowColor = 'rgba(255, 176, 48, 0.42)';
+  ctx.strokeStyle = `rgba(255, 166, 32, ${0.4 + boost * 0.18})`;
+  ctx.lineWidth = 12 + boost * 5;
+  traceSmoothTrail(ctx, points);
+  ctx.stroke();
+
+  ctx.shadowBlur = 8 + boost * 5;
+  ctx.shadowColor = 'rgba(255, 245, 190, 0.3)';
+  ctx.strokeStyle = `rgba(255, 244, 208, ${0.78 + boost * 0.14})`;
+  ctx.lineWidth = 4 + boost * 2;
+  traceSmoothTrail(ctx, points);
+  ctx.stroke();
+
+  points.forEach((point, index) => {
+    const alpha = (index + 1) / points.length;
+    const emberOffset = (1 - alpha) * (10 + boost * 8);
+    ctx.fillStyle = `rgba(255, 148, 48, ${0.08 + alpha * 0.18})`;
+    ctx.beginPath();
+    ctx.arc(point[0] - emberOffset * 0.35, point[1] + emberOffset * 0.18, 2 + alpha * 4, 0, Math.PI * 2);
+    ctx.fill();
+  });
   ctx.restore();
 }
 
-function drawImpactTrail(ctx, points, boost = 0) {
+function drawRibbonTrail(ctx, points, boost = 0) {
   if (points.length < 2) {
     return;
   }
   ctx.save();
+  ctx.globalCompositeOperation = 'screen';
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.shadowBlur = 26 + boost * 12;
-  ctx.shadowColor = 'rgba(255, 90, 0, 0.5)';
-  ctx.strokeStyle = `rgba(255, 80, 0, ${0.24 + boost * 0.18})`;
-  ctx.lineWidth = 22 + boost * 8;
+
+  ctx.shadowBlur = 24 + boost * 10;
+  ctx.shadowColor = 'rgba(94, 255, 208, 0.34)';
+  ctx.strokeStyle = `rgba(72, 255, 202, ${0.18 + boost * 0.14})`;
+  ctx.lineWidth = 20 + boost * 7;
   traceSmoothTrail(ctx, points);
   ctx.stroke();
 
-  ctx.shadowBlur = 14 + boost * 6;
-  ctx.shadowColor = 'rgba(255, 220, 120, 0.38)';
-  ctx.strokeStyle = `rgba(255, 196, 64, ${0.48 + boost * 0.2})`;
-  ctx.lineWidth = 10 + boost * 4;
+  ctx.shadowBlur = 10 + boost * 5;
+  ctx.shadowColor = 'rgba(214, 255, 244, 0.26)';
+  ctx.strokeStyle = `rgba(186, 255, 240, ${0.48 + boost * 0.18})`;
+  ctx.lineWidth = 9 + boost * 3;
   traceSmoothTrail(ctx, points);
   ctx.stroke();
 
+  ctx.strokeStyle = `rgba(248, 255, 252, ${0.72 + boost * 0.12})`;
+  ctx.lineWidth = 3.5 + boost * 1.5;
+  traceSmoothTrail(ctx, points);
+  ctx.stroke();
+
+  points.forEach((point, index) => {
+    const alpha = (index + 1) / points.length;
+    const spread = (1 - alpha) * (6 + boost * 4);
+    ctx.fillStyle = `rgba(172, 255, 231, ${0.08 + alpha * 0.12})`;
+    ctx.beginPath();
+    ctx.arc(point[0] + spread, point[1] - spread * 0.3, 2 + alpha * 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
   ctx.restore();
+}
+
+function getEffectPalette(effect, boost = 0) {
+  if (effect === 'comet') {
+    return {
+      burstStroke: `rgba(178, 236, 255, ${0.45 + boost * 0.4})`,
+      burstFill: `rgba(232, 248, 255, ${0.2 + boost * 0.32})`,
+      ballAura: `rgba(122, 220, 255, ${0.28 + boost * 0.16})`,
+      ballCore: '#c9f3ff',
+    };
+  }
+  if (effect === 'flame') {
+    return {
+      burstStroke: `rgba(255, 145, 60, ${0.5 + boost * 0.36})`,
+      burstFill: `rgba(255, 226, 176, ${0.22 + boost * 0.34})`,
+      ballAura: `rgba(255, 98, 28, ${0.38 + boost * 0.18})`,
+      ballCore: '#fff0a8',
+    };
+  }
+  if (effect === 'ribbon') {
+    return {
+      burstStroke: `rgba(172, 255, 226, ${0.48 + boost * 0.36})`,
+      burstFill: `rgba(225, 255, 242, ${0.2 + boost * 0.32})`,
+      ballAura: `rgba(82, 255, 198, ${0.28 + boost * 0.16})`,
+      ballCore: '#e4fff4',
+    };
+  }
+  return {
+    burstStroke: `rgba(255, 200, 90, ${0.52 + boost * 0.36})`,
+    burstFill: `rgba(255, 245, 210, ${0.18 + boost * 0.35})`,
+    ballAura: `rgba(255, 140, 0, ${0.35 + boost * 0.18})`,
+    ballCore: '#ffde59',
+  };
 }
 
 function drawTrailByEffect(ctx, points, effect, boost = 0) {
@@ -454,12 +519,12 @@ function drawTrailByEffect(ctx, points, effect, boost = 0) {
     drawCometTrail(ctx, points, boost);
     return;
   }
-  if (effect === 'arcade') {
-    drawArcadeTrail(ctx, points, boost);
+  if (effect === 'flame') {
+    drawFlameTrail(ctx, points, boost);
     return;
   }
-  if (effect === 'impact') {
-    drawImpactTrail(ctx, points, boost);
+  if (effect === 'ribbon') {
+    drawRibbonTrail(ctx, points, boost);
     return;
   }
   drawSmoothTrail(ctx, points);
@@ -511,10 +576,11 @@ function drawShotBurst(ctx, effect, boost) {
   }
   const radiusBase = 34 + boost * 42;
   const angleStep = effect === 'arcade' ? 6 : 8;
+  const palette = getEffectPalette(effect, boost);
   ctx.save();
   ctx.translate(activeShotFx.x, activeShotFx.y);
   ctx.globalCompositeOperation = 'screen';
-  ctx.strokeStyle = effect === 'comet' ? `rgba(178, 236, 255, ${0.45 + boost * 0.4})` : `rgba(255, 200, 90, ${0.52 + boost * 0.36})`;
+  ctx.strokeStyle = palette.burstStroke;
   ctx.lineWidth = 3 + boost * 4;
   for (let index = 0; index < angleStep; index += 1) {
     const angle = (Math.PI * 2 * index) / angleStep;
@@ -525,7 +591,7 @@ function drawShotBurst(ctx, effect, boost) {
     ctx.lineTo(Math.cos(angle) * outer, Math.sin(angle) * outer);
     ctx.stroke();
   }
-  ctx.fillStyle = `rgba(255, 245, 210, ${0.18 + boost * 0.35})`;
+  ctx.fillStyle = palette.burstFill;
   ctx.beginPath();
   ctx.arc(0, 0, 16 + boost * 18, 0, Math.PI * 2);
   ctx.fill();
@@ -665,6 +731,7 @@ function drawOverlay(ctx, canvas, metadata) {
   const effect = getSelectedEffect();
   markShotEffect(metadata, renderedBallBox, ballTrail);
   const shotBoost = getShotBoost();
+  const effectPalette = getEffectPalette(effect, shotBoost);
   if (ballTrail.length >= 2) {
     drawTrailByEffect(ctx, ballTrail, effect, shotBoost);
   }
@@ -674,11 +741,11 @@ function drawOverlay(ctx, canvas, metadata) {
     const centerX = (x1 + x2) / 2;
     const centerY = (y1 + y2) / 2;
     const radius = Math.max((x2 - x1) / 2, 6);
-    ctx.fillStyle = `rgba(255, 140, 0, ${0.35 + shotBoost * 0.18})`;
+    ctx.fillStyle = effectPalette.ballAura;
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius + 8 + shotBoost * 8, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = effect === 'comet' ? '#c9f3ff' : '#ffde59';
+    ctx.fillStyle = effectPalette.ballCore;
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius + shotBoost * 2.5, 0, Math.PI * 2);
     ctx.fill();

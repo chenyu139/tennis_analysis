@@ -14,7 +14,7 @@ class PipelineConfig:
     render_court_keypoints: bool = False
     player_history_size: int = 30
     ball_history_size: int = 45
-    ball_trail_size: int = 12
+    ball_trail_size: int = 13
     max_ball_gap_seconds: float = 0.5
     ball_max_missing_frames: int = 2
     shot_confirm_window_seconds: float = 0.35
