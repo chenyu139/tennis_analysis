@@ -107,6 +107,10 @@ class DemoRequestHandler(BaseHTTPRequestHandler):
         if route == '/api/runtime':
             self._send_json(self._build_runtime_payload())
             return
+        if route == '/api/tactical':
+            overlay = self.state_store.get_overlay()
+            self._send_json(overlay.tactical if overlay.tactical else {})
+            return
         if route == '/stream/raw.h264':
             self._serve_h264_stream(self.raw_transport_hub)
             return

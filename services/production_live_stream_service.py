@@ -203,6 +203,7 @@ class ProductionLiveStreamService:
             quality_level=overlay.quality_level,
             status=overlay.status,
             debug=dict(overlay.debug),
+            tactical=overlay.tactical,
         )
 
     def _build_analysis_units(self, raw_units: list[EncodedAccessUnit], metadata: dict) -> list[EncodedAccessUnit]:

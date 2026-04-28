@@ -54,13 +54,48 @@
           </div>
         </div>
       </section>
-      <section class="panel">
-        <div class="panel-title">运行状态</div>
-        <div id="overlay-status" class="kv"></div>
-      </section>
-      <section class="panel">
-        <div class="panel-title">直播指标</div>
-        <div id="metrics" class="kv"></div>
+      <aside class="sidebar">
+        <section class="panel">
+          <div class="panel-title">运行状态</div>
+          <div id="overlay-status" class="kv"></div>
+        </section>
+        <section class="panel">
+          <div class="panel-title">直播指标</div>
+          <div id="metrics" class="kv"></div>
+        </section>
+      </aside>
+      <section class="panel tactical-panel full-width">
+        <div class="panel-title">战术分析</div>
+        <div class="tactical-grid">
+          <div class="tactical-card">
+            <div class="tactical-card-title">回合统计</div>
+            <div id="rally-stats" class="kv"></div>
+          </div>
+          <div class="tactical-card">
+            <div class="tactical-card-title">击球类型分布</div>
+            <div id="shot-dist" class="shot-bars"></div>
+          </div>
+          <div class="tactical-card">
+            <div class="tactical-card-title">落点区域分布</div>
+            <div id="landing-zones" class="zone-bars"></div>
+          </div>
+          <div class="tactical-card heatmap-card">
+            <div class="tactical-card-title">球员站位热力图</div>
+            <div class="heatmap-wrapper">
+              <div class="heatmap-player-label">P1 远端</div>
+              <canvas id="heatmap-canvas" width="140" height="320"></canvas>
+              <div class="heatmap-player-label">P2 近端</div>
+            </div>
+          </div>
+          <div class="tactical-card">
+            <div class="tactical-card-title">上网统计</div>
+            <div id="net-approach" class="kv"></div>
+          </div>
+          <div class="tactical-card">
+            <div class="tactical-card-title">击球速度</div>
+            <div id="speed-stats" class="kv"></div>
+          </div>
+        </div>
       </section>
       <section class="panel tips">
         <div class="panel-title">讲解建议</div>

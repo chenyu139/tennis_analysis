@@ -9,6 +9,7 @@ __pycache__
 *.mp4
 output_videos/*
 runtime/*
+*.cache
 *.iml
 *.log
 .idea/

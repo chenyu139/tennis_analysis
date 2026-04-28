@@ -44,6 +44,7 @@ class OverlayState:
     quality_level: str = 'full'
     debug: dict[str, Any] = field(default_factory=dict)
     status: str = 'idle'
+    tactical: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -112,6 +113,7 @@ class TransportPacket:
     quality_level: str = 'full'
     status: str = 'idle'
     debug: dict[str, Any] = field(default_factory=dict)
+    tactical: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -129,4 +131,5 @@ class TransportPacket:
             'quality_level': self.quality_level,
             'status': self.status,
             'debug': to_json_safe(self.debug),
+            'tactical': to_json_safe(self.tactical),
         }

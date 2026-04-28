@@ -7,6 +7,13 @@ const ballDetectorSelect = document.getElementById('ball-detector-select');
 const effectSelect = document.getElementById('effect-select');
 const overlayRoot = document.getElementById('overlay-status');
 const metricsRoot = document.getElementById('metrics');
+const rallyStatsRoot = document.getElementById('rally-stats');
+const shotDistRoot = document.getElementById('shot-dist');
+const heatmapCanvas = document.getElementById('heatmap-canvas');
+const heatmapCtx = heatmapCanvas.getContext('2d');
+const landingZonesRoot = document.getElementById('landing-zones');
+const netApproachRoot = document.getElementById('net-approach');
+const speedStatsRoot = document.getElementById('speed-stats');
 
 const SEI_UUID_HEX = '7ce15f8687544f0fa4cfc9a0ab12f65b';
 
@@ -1123,3 +1130,216 @@ if (effectSelect) {
 loadRuntimeConfig().then(() => startPlayback());
 refreshPanels();
 setInterval(refreshPanels, 500);
+
+const SHOT_TYPE_LABELS = {
+  forehand: '正手',
+  backhand: '反手',
+  volley: '截击',
+  serve: '发球',
+  overhead: '高压',
+  unknown: '其他',
+};
+
+function renderRallyStats(data) {
+  if (!data || !rallyStatsRoot) return;
+  const rs = data.rally_stats || {};
+  renderPairs(rallyStatsRoot, {
+    '总回合数': rs.total_rallies || 0,
+    '最长回合': (rs.max_rally_length || 0) + ' 拍',
+    '平均回合': (rs.avg_rally_length || 0) + ' 拍',
+    '当前回合': (rs.current_rally_length || 0) + ' 拍',
+    'P1 赢回合': (rs.wins_by_player || {})['1'] || 0,
+    'P2 赢回合': (rs.wins_by_player || {})['2'] || 0,
+  });
+}
+
+function renderShotDistribution(data) {
+  if (!data || !shotDistRoot) return;
+  const dist = data.shot_distribution || {};
+  const allTypes = new Set();
+  Object.values(dist).forEach((player) => Object.keys(player).forEach((t) => allTypes.add(t)));
+  allTypes.delete('total');
+
+  let html = '';
+  allTypes.forEach((shotType) => {
+    const p1Count = (dist['1'] || {})[shotType] || 0;
+    const p2Count = (dist['2'] || {})[shotType] || 0;
+    const maxCount = Math.max(p1Count, p2Count, 1);
+    const label = SHOT_TYPE_LABELS[shotType] || shotType;
+    html += `<div class="shot-bar-row">
+      <span class="shot-bar-label">${label}</span>
+      <div class="shot-bar-track"><div class="shot-bar-fill p1-bar" style="width:${(p1Count / maxCount * 100).toFixed(1)}%"></div></div>
+      <span class="shot-bar-value">${p1Count}</span>
+      <div class="shot-bar-track"><div class="shot-bar-fill p2-bar" style="width:${(p2Count / maxCount * 100).toFixed(1)}%"></div></div>
+      <span class="shot-bar-value">${p2Count}</span>
+    </div>`;
+  });
+  if (html) {
+    html = '<div style="display:flex;justify-content:space-between;font-size:11px;color:#89a3c7;margin-bottom:4px"><span></span><span>P1</span><span></span><span>P2</span><span></span></div>' + html;
+  }
+  shotDistRoot.innerHTML = html || '<div style="color:#89a3c7;font-size:12px">等待数据...</div>';
+}
+
+function renderHeatmap(data) {
+  if (!data || !heatmapCanvas || !heatmapCtx) return;
+  const hm = data.player_heatmap || {};
+  const width = heatmapCanvas.width;
+  const height = heatmapCanvas.height;
+  const halfH = height / 2;
+
+  heatmapCtx.clearRect(0, 0, width, height);
+  heatmapCtx.fillStyle = '#0b1220';
+  heatmapCtx.fillRect(0, 0, width, height);
+
+  heatmapCtx.strokeStyle = '#3a5070';
+  heatmapCtx.lineWidth = 2;
+  heatmapCtx.beginPath();
+  heatmapCtx.moveTo(0, halfH);
+  heatmapCtx.lineTo(width, halfH);
+  heatmapCtx.stroke();
+
+  const courtMargin = 6;
+  heatmapCtx.strokeStyle = '#25324a';
+  heatmapCtx.lineWidth = 1;
+  [courtMargin, halfH - courtMargin, halfH + courtMargin, height - courtMargin].forEach((y) => {
+    heatmapCtx.beginPath();
+    heatmapCtx.moveTo(courtMargin, y);
+    heatmapCtx.lineTo(width - courtMargin, y);
+    heatmapCtx.stroke();
+  });
+  [courtMargin, width / 3, (width * 2) / 3, width - courtMargin].forEach((x) => {
+    heatmapCtx.beginPath();
+    heatmapCtx.moveTo(x, courtMargin);
+    heatmapCtx.lineTo(x, height - courtMargin);
+    heatmapCtx.stroke();
+  });
+
+  const playerColors = {
+    '1': { r: 255, g: 216, b: 107 },
+    '2': { r: 138, g: 214, b: 255 },
+  };
+
+  Object.entries(hm).forEach(([playerId, playerData]) => {
+    const grid = playerData.grid;
+    const size = playerData.size || 10;
+    const maxVal = playerData.max || 1;
+    const color = playerColors[playerId] || { r: 200, g: 200, b: 200 };
+    const isP1 = playerId === '1';
+    const halfSize = Math.ceil(size / 2);
+
+    for (let row = 0; row < size; row++) {
+      for (let col = 0; col < size; col++) {
+        const val = (grid[row] || [])[col] || 0;
+        if (val === 0) continue;
+
+        const isInPlayerHalf = isP1 ? (row < halfSize) : (row >= halfSize);
+        if (!isInPlayerHalf) continue;
+
+        const intensity = Math.min(val / maxVal, 1.0);
+        const alpha = 0.2 + intensity * 0.7;
+        heatmapCtx.fillStyle = `rgba(${color.r},${color.g},${color.b},${alpha.toFixed(2)})`;
+
+        const cellW = (width - 2 * courtMargin) / size;
+        const cellH = (halfH - 2 * courtMargin) / halfSize;
+        let drawX = courtMargin + col * cellW;
+        let drawY;
+        if (isP1) {
+          drawY = courtMargin + row * cellH;
+        } else {
+          drawY = halfH + courtMargin + (row - halfSize) * cellH;
+        }
+        heatmapCtx.fillRect(drawX, drawY, cellW, cellH);
+      }
+    }
+  });
+
+  heatmapCtx.fillStyle = '#ffd86b';
+  heatmapCtx.font = 'bold 11px Arial';
+  heatmapCtx.textAlign = 'center';
+  heatmapCtx.fillText('P1', width / 2, courtMargin + 12);
+
+  heatmapCtx.fillStyle = '#8ad6ff';
+  heatmapCtx.fillText('P2', width / 2, height - courtMargin - 4);
+
+  heatmapCtx.fillStyle = '#5a7a9a';
+  heatmapCtx.font = '9px Arial';
+  heatmapCtx.fillText('NET', width / 2, halfH - 3);
+}
+
+function renderLandingZones(data) {
+  if (!data || !landingZonesRoot) return;
+  const zones = data.landing_zones || {};
+  const allZoneKeys = new Set();
+  Object.values(zones).forEach((player) => Object.keys(player).forEach((z) => allZoneKeys.add(z)));
+  allZoneKeys.delete('total');
+
+  let html = '';
+  const sortedZones = Array.from(allZoneKeys).sort();
+  sortedZones.forEach((zone) => {
+    const p1Count = (zones['1'] || {})[zone] || 0;
+    const p2Count = (zones['2'] || {})[zone] || 0;
+    const maxCount = Math.max(p1Count, p2Count, 1);
+    html += `<div class="zone-bar-row">
+      <span class="zone-bar-label">${zone}</span>
+      <div class="zone-bar-track"><div class="zone-bar-fill p1-bar" style="width:${(p1Count / maxCount * 100).toFixed(1)}%"></div></div>
+      <span class="zone-bar-value">${p1Count}</span>
+      <div class="zone-bar-track"><div class="zone-bar-fill p2-bar" style="width:${(p2Count / maxCount * 100).toFixed(1)}%"></div></div>
+      <span class="zone-bar-value">${p2Count}</span>
+    </div>`;
+  });
+  if (html) {
+    html = '<div style="display:flex;justify-content:space-between;font-size:11px;color:#89a3c7;margin-bottom:4px"><span></span><span>P1</span><span></span><span>P2</span><span></span></div>' + html;
+  }
+  landingZonesRoot.innerHTML = html || '<div style="color:#89a3c7;font-size:12px">等待数据...</div>';
+}
+
+function renderNetApproach(data) {
+  if (!data || !netApproachRoot) return;
+  const na = data.net_approach || {};
+  const p1 = na['1'] || {};
+  const p2 = na['2'] || {};
+  renderPairs(netApproachRoot, {
+    'P1 上网次数': p1.attempts || 0,
+    'P1 上网得分': p1.wins || 0,
+    'P1 上网得分率': ((p1.win_rate || 0) * 100).toFixed(0) + '%',
+    'P2 上网次数': p2.attempts || 0,
+    'P2 上网得分': p2.wins || 0,
+    'P2 上网得分率': ((p2.win_rate || 0) * 100).toFixed(0) + '%',
+  });
+}
+
+function renderSpeedStats(data) {
+  if (!data || !speedStatsRoot) return;
+  const speeds = data.speed_by_shot_type || {};
+  const rows = {};
+  Object.entries(speeds).forEach(([playerId, typeSpeeds]) => {
+    const label = playerId === '1' ? 'P1' : 'P2';
+    Object.entries(typeSpeeds).forEach(([shotType, stats]) => {
+      const typeLabel = SHOT_TYPE_LABELS[shotType] || shotType;
+      rows[`${label} ${typeLabel} 均速`] = (stats.avg || 0).toFixed(1) + ' km/h';
+      rows[`${label} ${typeLabel} 最快`] = (stats.max || 0).toFixed(1) + ' km/h';
+    });
+  });
+  if (Object.keys(rows).length === 0) {
+    rows['等待数据'] = '';
+  }
+  renderPairs(speedStatsRoot, rows);
+}
+
+async function refreshTacticalPanel() {
+  try {
+    const resp = await fetch('/api/tactical', { cache: 'no-store' });
+    const data = await resp.json();
+    if (!data || !Object.keys(data).length) return;
+    renderRallyStats(data);
+    renderShotDistribution(data);
+    renderHeatmap(data);
+    renderLandingZones(data);
+    renderNetApproach(data);
+    renderSpeedStats(data);
+  } catch (e) {
+    // ignore
+  }
+}
+
+setInterval(refreshTacticalPanel, 1000);

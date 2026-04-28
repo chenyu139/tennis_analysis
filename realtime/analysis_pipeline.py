@@ -11,6 +11,7 @@ from .court_state import CourtState
 from .degrade_policy import DegradePolicy
 from .player_history import PlayerTrackState
 from .stats_aggregator import LiveStatsAggregator
+from .tactical_aggregator import TacticalAggregator
 from streaming.models import OverlayState
 from streaming.scheduler import AnalysisScheduler
 
@@ -73,6 +74,7 @@ class RealtimeAnalysisPipeline:
         self.degrade_policy = DegradePolicy(config)
         self.projector = None
         self.stats_aggregator = None
+        self.tactical_aggregator = None
         self.consecutive_failures = 0
         self.analysis_count = 0
         self.cached_player_boxes = {}
@@ -81,6 +83,9 @@ class RealtimeAnalysisPipeline:
         if self.projector is None:
             self.projector = MiniCourtProjector(video_frame.image, self.player_state)
             self.stats_aggregator = LiveStatsAggregator(self.projector.mini_court.get_width_of_mini_court())
+            self.tactical_aggregator = TacticalAggregator(
+                mini_court_width_pixels=self.projector.mini_court.get_width_of_mini_court(),
+            )
 
         if not self.scheduler.should_analyze(video_frame.pts):
             return self.state_store.get_overlay()
@@ -160,6 +165,22 @@ class RealtimeAnalysisPipeline:
         if self.stats_aggregator is not None:
             stats_row = self.stats_aggregator.update(video_frame.pts, player_mini_court, ball_mini_court, shot_event)
 
+        tactical_state = {}
+        if self.tactical_aggregator is not None:
+            try:
+                tactical_state = self.tactical_aggregator.update(
+                    pts=video_frame.pts,
+                    shot_event=shot_event,
+                    player_mini_court=player_mini_court,
+                    ball_mini_court=ball_mini_court,
+                    court_keypoints=court_keypoints,
+                    ball_box_is_none=(ball_box is None),
+                    frame_width=float(video_frame.image.shape[1]),
+                    frame_height=float(video_frame.image.shape[0]),
+                )
+            except Exception as exc:
+                debug['tactical_error'] = str(exc)
+
         processing_ms = (time.perf_counter() - start) * 1000.0
         if status == 'ok':
             self.consecutive_failures = 0
@@ -187,6 +208,7 @@ class RealtimeAnalysisPipeline:
                 **debug,
             },
             status=status,
+            tactical=tactical_state,
         )
         self.analysis_count += 1
         self.state_store.update_overlay(overlay)
