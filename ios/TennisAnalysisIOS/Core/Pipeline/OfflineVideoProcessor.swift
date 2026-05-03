@@ -83,10 +83,15 @@ final class OfflineVideoProcessor {
         }
 
         var frameIndex = 0
+        var lastCourtRefreshFrame = -30
         while let sampleBuffer = output.copyNextSampleBuffer() {
             let timestampNs = sampleBuffer.timestampNs
-            if courtKeypoints.isEmpty {
-                courtKeypoints = try await courtDetector.detectCourtKeypoints(sampleBuffer: sampleBuffer)
+            if courtKeypoints.isEmpty || (frameIndex - lastCourtRefreshFrame) >= 30 {
+                let refreshedKeypoints = try await courtDetector.detectCourtKeypoints(sampleBuffer: sampleBuffer)
+                if !refreshedKeypoints.isEmpty {
+                    courtKeypoints = refreshedKeypoints
+                    lastCourtRefreshFrame = frameIndex
+                }
             }
 
             let playerDetectionsRaw = try await playerDetector.detectDetections(sampleBuffer: sampleBuffer)

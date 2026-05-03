@@ -5,7 +5,7 @@ import CoreML
 import Foundation
 
 enum PixelBufferTools {
-    private static let ciContext = CIContext(options: nil)
+    private static let _sharedContext = CIContext(options: [.useSoftwareRenderer: false])
 
     static func pixelBuffer(from sampleBuffer: CMSampleBuffer) throws -> CVPixelBuffer {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
@@ -35,7 +35,7 @@ enum PixelBufferTools {
         let scaleX = CGFloat(width) / image.extent.width
         let scaleY = CGFloat(height) / image.extent.height
         let resized = image.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
-        ciContext.render(resized, to: output)
+        _sharedContext.render(resized, to: output)
         return output
     }
 
@@ -59,13 +59,13 @@ enum PixelBufferTools {
         }
 
         let image = CIImage(cvPixelBuffer: pixelBuffer)
-        ciContext.render(image, to: output)
+        _sharedContext.render(image, to: output)
         return output
     }
 
     static func makeCGImage(from pixelBuffer: CVPixelBuffer) -> CGImage? {
         let image = CIImage(cvPixelBuffer: pixelBuffer)
-        return ciContext.createCGImage(
+        return _sharedContext.createCGImage(
             image,
             from: CGRect(
                 x: 0,

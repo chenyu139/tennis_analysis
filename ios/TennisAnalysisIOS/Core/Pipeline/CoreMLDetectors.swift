@@ -47,10 +47,12 @@ class BaseCoreMLModel {
 
 final class YoloCoreMLDetector: BaseCoreMLModel {
     private let config: DetectorConfig
+    private let metadataHasObjectness: Bool?
 
     init(config: DetectorConfig) throws {
         self.config = config
         try super.init(modelBaseName: config.modelBaseName)
+        self.metadataHasObjectness = metadata.hasObjectness
     }
 
     func detect(sampleBuffer: CMSampleBuffer, timestampNs: UInt64) async throws -> [Detection] {
@@ -104,7 +106,7 @@ final class YoloCoreMLDetector: BaseCoreMLModel {
             return multiArray.floatValue(atFlatIndex: candidateIndex * attributeCount + attributeIndex)
         }
 
-        let hasObjectness = attributeCount == 6 || attributeCount == 85
+        let hasObjectness = metadataHasObjectness ?? (attributeCount == 6 || attributeCount == 85)
         let classStartIndex = hasObjectness ? 5 : 4
         let classCount = attributeCount - classStartIndex
         var maxCoordinate: Float = 0
@@ -203,7 +205,8 @@ final class PlayerCoreMLDetector: PlayerDetecting {
     }
 
     func detectDetections(sampleBuffer: CMSampleBuffer) async throws -> [Detection] {
-        try await detector.detect(sampleBuffer: sampleBuffer, timestampNs: sampleBuffer.timestampNs)
+        let allDetections = try await detector.detect(sampleBuffer: sampleBuffer, timestampNs: sampleBuffer.timestampNs)
+        return allDetections.filter { $0.classId == 0 }
     }
 }
 
@@ -227,7 +230,8 @@ final class BallCoreMLDetector: BallDetecting {
     }
 
     func detectDetections(sampleBuffer: CMSampleBuffer) async throws -> [Detection] {
-        try await detector.detect(sampleBuffer: sampleBuffer, timestampNs: sampleBuffer.timestampNs)
+        let allDetections = try await detector.detect(sampleBuffer: sampleBuffer, timestampNs: sampleBuffer.timestampNs)
+        return allDetections.filter { $0.classId == 0 }
     }
 }
 

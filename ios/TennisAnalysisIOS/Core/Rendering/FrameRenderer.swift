@@ -146,27 +146,37 @@ struct FrameRenderer {
     }
 
     private func drawStats(context: CGContext, frameSize: CGSize, stats: PlayerStatsRow) {
-        let startX = frameSize.width - 400
-        let startY = frameSize.height - 500
-        let width: CGFloat = 360
-        let height: CGFloat = 320
-        let rect = CGRect(x: startX, y: startY, width: width, height: height)
+        let scale = min(frameSize.width / 1920.0, frameSize.height / 1080.0)
+        let panelWidth: CGFloat = 360 * scale
+        let panelHeight: CGFloat = 320 * scale
+        let padding: CGFloat = 16 * scale
+        let startX = frameSize.width - panelWidth - padding
+        let startY = frameSize.height - panelHeight - padding
+        let rect = CGRect(x: startX, y: startY, width: panelWidth, height: panelHeight)
         context.setFillColor(UIColor.black.withAlphaComponent(0.5).cgColor)
         context.fill(rect)
 
-        drawText(context: context, text: "     Player 1     Player 2", origin: CGPoint(x: startX + 85, y: startY + 30), color: .white, fontSize: 18, weight: .semibold)
-        drawText(context: context, text: "Shot Speed", origin: CGPoint(x: startX + 10, y: startY + 80), color: .white, fontSize: 14)
-        drawText(context: context, text: String(format: "%.1f km/h    %.1f km/h", stats.player1LastShotSpeed, stats.player2LastShotSpeed), origin: CGPoint(x: startX + 130, y: startY + 80), color: .white, fontSize: 16, weight: .semibold)
-        drawText(context: context, text: "Player Speed", origin: CGPoint(x: startX + 10, y: startY + 120), color: .white, fontSize: 14)
-        drawText(context: context, text: String(format: "%.1f km/h    %.1f km/h", stats.player1LastPlayerSpeed, stats.player2LastPlayerSpeed), origin: CGPoint(x: startX + 130, y: startY + 120), color: .white, fontSize: 16, weight: .semibold)
-        drawText(context: context, text: "avg. S. Speed", origin: CGPoint(x: startX + 10, y: startY + 160), color: .white, fontSize: 14)
-        drawText(context: context, text: String(format: "%.1f km/h    %.1f km/h", stats.player1AverageShotSpeed, stats.player2AverageShotSpeed), origin: CGPoint(x: startX + 130, y: startY + 160), color: .white, fontSize: 16, weight: .semibold)
-        drawText(context: context, text: "avg. P. Speed", origin: CGPoint(x: startX + 10, y: startY + 200), color: .white, fontSize: 14)
-        drawText(context: context, text: String(format: "%.1f km/h    %.1f km/h", stats.player1AveragePlayerSpeed, stats.player2AveragePlayerSpeed), origin: CGPoint(x: startX + 130, y: startY + 200), color: .white, fontSize: 16, weight: .semibold)
-        drawText(context: context, text: "Distance", origin: CGPoint(x: startX + 10, y: startY + 240), color: .white, fontSize: 14)
-        drawText(context: context, text: String(format: "%.1f m      %.1f m", stats.player1TotalDistanceRun, stats.player2TotalDistanceRun), origin: CGPoint(x: startX + 130, y: startY + 240), color: .white, fontSize: 16, weight: .semibold)
-        drawText(context: context, text: "Calories", origin: CGPoint(x: startX + 10, y: startY + 280), color: .white, fontSize: 14)
-        drawText(context: context, text: String(format: "%.1f kcal   %.1f kcal", stats.player1TotalCaloriesBurned, stats.player2TotalCaloriesBurned), origin: CGPoint(x: startX + 130, y: startY + 280), color: .white, fontSize: 16, weight: .semibold)
+        let labelFontSize: CGFloat = 14 * scale
+        let valueFontSize: CGFloat = 16 * scale
+        let headerFontSize: CGFloat = 18 * scale
+        let labelX = startX + 10 * scale
+        let valueX = startX + 130 * scale
+        let rowHeight: CGFloat = 40 * scale
+        let headerY = startY + 30 * scale
+
+        drawText(context: context, text: "     Player 1     Player 2", origin: CGPoint(x: startX + 85 * scale, y: headerY), color: .white, fontSize: headerFontSize, weight: .semibold)
+        drawText(context: context, text: "Shot Speed", origin: CGPoint(x: labelX, y: headerY + rowHeight), color: .white, fontSize: labelFontSize)
+        drawText(context: context, text: String(format: "%.1f km/h    %.1f km/h", stats.player1LastShotSpeed, stats.player2LastShotSpeed), origin: CGPoint(x: valueX, y: headerY + rowHeight), color: .white, fontSize: valueFontSize, weight: .semibold)
+        drawText(context: context, text: "Player Speed", origin: CGPoint(x: labelX, y: headerY + 2 * rowHeight), color: .white, fontSize: labelFontSize)
+        drawText(context: context, text: String(format: "%.1f km/h    %.1f km/h", stats.player1LastPlayerSpeed, stats.player2LastPlayerSpeed), origin: CGPoint(x: valueX, y: headerY + 2 * rowHeight), color: .white, fontSize: valueFontSize, weight: .semibold)
+        drawText(context: context, text: "avg. S. Speed", origin: CGPoint(x: labelX, y: headerY + 3 * rowHeight), color: .white, fontSize: labelFontSize)
+        drawText(context: context, text: String(format: "%.1f km/h    %.1f km/h", stats.player1AverageShotSpeed, stats.player2AverageShotSpeed), origin: CGPoint(x: valueX, y: headerY + 3 * rowHeight), color: .white, fontSize: valueFontSize, weight: .semibold)
+        drawText(context: context, text: "avg. P. Speed", origin: CGPoint(x: labelX, y: headerY + 4 * rowHeight), color: .white, fontSize: labelFontSize)
+        drawText(context: context, text: String(format: "%.1f km/h    %.1f km/h", stats.player1AveragePlayerSpeed, stats.player2AveragePlayerSpeed), origin: CGPoint(x: valueX, y: headerY + 4 * rowHeight), color: .white, fontSize: valueFontSize, weight: .semibold)
+        drawText(context: context, text: "Distance", origin: CGPoint(x: labelX, y: headerY + 5 * rowHeight), color: .white, fontSize: labelFontSize)
+        drawText(context: context, text: String(format: "%.1f m      %.1f m", stats.player1TotalDistanceRun, stats.player2TotalDistanceRun), origin: CGPoint(x: valueX, y: headerY + 5 * rowHeight), color: .white, fontSize: valueFontSize, weight: .semibold)
+        drawText(context: context, text: "Calories", origin: CGPoint(x: labelX, y: headerY + 6 * rowHeight), color: .white, fontSize: labelFontSize)
+        drawText(context: context, text: String(format: "%.1f kcal   %.1f kcal", stats.player1TotalCaloriesBurned, stats.player2TotalCaloriesBurned), origin: CGPoint(x: valueX, y: headerY + 6 * rowHeight), color: .white, fontSize: valueFontSize, weight: .semibold)
     }
 
     private func drawFrameNumber(context: CGContext, frameNumber: Int) {

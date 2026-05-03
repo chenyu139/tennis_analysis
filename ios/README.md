@@ -5,9 +5,9 @@
 Run these commands on macOS:
 
 ```bash
-python tools/mobile_export/export_models.py player --weights /path/to/player.pt --format coreml --mobile-target ane
-python tools/mobile_export/export_models.py ball --weights /path/to/ball.pt --format coreml --mobile-target ane
-python tools/mobile_export/export_models.py court --weights /path/to/court.pth --format coreml --mobile-target ane
+python tools/mobile_export/export_models.py player --weights models/yolov8n_player_sichuan_v1.pt --format coreml --mobile-target ane
+python tools/mobile_export/export_models.py ball --weights models/yolov8s_ball_sichuan_v1.pt --format coreml --mobile-target ane
+python tools/mobile_export/export_models.py court --weights models/keypoints_model.pth --format coreml --mobile-target ane
 ```
 
 This produces:

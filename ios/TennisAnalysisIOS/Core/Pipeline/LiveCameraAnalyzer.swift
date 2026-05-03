@@ -24,6 +24,8 @@ private actor LiveFramePipeline {
     private var frameIndex = 0
     private var lastCourtRefreshFrame = -30
     private var lastAnalysisTimestampNs: UInt64?
+    private var consecutiveErrors = 0
+    private let maxConsecutiveErrors = 10
 
     init() throws {
         playerDetector = try PlayerCoreMLDetector()
@@ -51,13 +53,15 @@ private actor LiveFramePipeline {
             }
         }
 
-        async let playerDetectionsTask = playerDetector.detectDetections(sampleBuffer: sampleBuffer)
-        async let ballDetectionsTask = ballDetector.detectDetections(sampleBuffer: sampleBuffer)
-        let playerDetections = try await playerDetectionsTask
-        let ballDetections = try await ballDetectionsTask
+        // Run player and ball detection sequentially to avoid CIContext
+        // concurrency issues (CIContext.render is not thread-safe).
+        let playerDetections = try await playerDetector.detectDetections(sampleBuffer: sampleBuffer)
+        let ballDetections = try await ballDetector.detectDetections(sampleBuffer: sampleBuffer)
 
         let trackedPlayers = playerTracker.update(detections: playerDetections, timestampNs: timestampNs)
         let trackedBall = ballTrackFilter.update(detections: ballDetections, timestampNs: timestampNs)
+
+        consecutiveErrors = 0
 
         let analysisFPS: Double
         if let lastAnalysisTimestampNs, timestampNs > lastAnalysisTimestampNs {
@@ -78,6 +82,15 @@ private actor LiveFramePipeline {
             analysisFPS: analysisFPS
         )
     }
+
+    func recordError() -> Bool {
+        consecutiveErrors += 1
+        return consecutiveErrors < maxConsecutiveErrors
+    }
+
+    func resetErrors() {
+        consecutiveErrors = 0
+    }
 }
 
 final class LiveCameraAnalyzer: NSObject, ObservableObject {
@@ -94,10 +107,11 @@ final class LiveCameraAnalyzer: NSObject, ObservableObject {
 
     private var framePipeline: LiveFramePipeline?
     private var isSessionConfigured = false
-    private var isProcessingFrame = false
     private var currentVideoOrientation: AVCaptureVideoOrientation = .portrait
     private var lastSubmittedTimestampNs: UInt64 = 0
-    private let targetAnalysisFPS: Double = 20
+    private let targetAnalysisFPS: Double = 15
+    private var pendingFrameCount = 0
+    private let maxPendingFrames = 2
 
     func start() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -128,7 +142,7 @@ final class LiveCameraAnalyzer: NSObject, ObservableObject {
                 self.captureSession.stopRunning()
             }
             self.framePipeline = nil
-            self.isProcessingFrame = false
+            self.pendingFrameCount = 0
             self.lastSubmittedTimestampNs = 0
             DispatchQueue.main.async {
                 self.isRunning = false
@@ -158,6 +172,7 @@ final class LiveCameraAnalyzer: NSObject, ObservableObject {
                     try self.configureSession()
                 }
                 self.framePipeline = try LiveFramePipeline()
+                self.pendingFrameCount = 0
                 guard !self.captureSession.isRunning else {
                     DispatchQueue.main.async {
                         self.isRunning = true
@@ -318,9 +333,9 @@ extension LiveCameraAnalyzer: AVCaptureVideoDataOutputSampleBufferDelegate {
         let timestampNs = sampleBuffer.timestampNs
         let minimumIntervalNs = UInt64(1_000_000_000.0 / targetAnalysisFPS)
         guard timestampNs >= lastSubmittedTimestampNs + minimumIntervalNs else { return }
-        guard !isProcessingFrame, let framePipeline else { return }
+        guard pendingFrameCount < maxPendingFrames, let framePipeline else { return }
 
-        isProcessingFrame = true
+        pendingFrameCount += 1
         lastSubmittedTimestampNs = timestampNs
 
         var sampleBufferCopy: CMSampleBuffer?
@@ -330,7 +345,7 @@ extension LiveCameraAnalyzer: AVCaptureVideoDataOutputSampleBufferDelegate {
             sampleBufferOut: &sampleBufferCopy
         )
         guard copyStatus == noErr, let sampleBufferCopy else {
-            isProcessingFrame = false
+            pendingFrameCount -= 1
             return
         }
 
@@ -338,18 +353,20 @@ extension LiveCameraAnalyzer: AVCaptureVideoDataOutputSampleBufferDelegate {
             do {
                 let processedFrame = try await framePipeline.process(sampleBuffer: sampleBufferCopy)
                 self?.publishProcessedFrame(processedFrame)
-                self?.captureQueue.async {
-                    self?.isProcessingFrame = false
-                }
             } catch {
-                self?.captureQueue.async {
-                    self?.isProcessingFrame = false
-                    self?.framePipeline = nil
-                    if self?.captureSession.isRunning == true {
-                        self?.captureSession.stopRunning()
+                let shouldContinue = await framePipeline.recordError()
+                if !shouldContinue {
+                    self?.captureQueue.async {
+                        self?.framePipeline = nil
+                        if self?.captureSession.isRunning == true {
+                            self?.captureSession.stopRunning()
+                        }
                     }
+                    self?.publish(error: error)
                 }
-                self?.publish(error: error)
+            }
+            self?.captureQueue.async {
+                self?.pendingFrameCount -= 1
             }
         }
     }

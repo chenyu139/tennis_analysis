@@ -1,6 +1,6 @@
 {
   "name": "ball",
-  "source_weights": "/Users/chenyu/workspace/tennis_analysis/models/yolo5_last.pt",
+  "source_weights": "/Users/chenyu/workspace/tennis_analysis/models/yolov8s_ball_sichuan_v1.pt",
   "exported_model": "/Users/chenyu/workspace/tennis_analysis/mobile_artifacts/ball/ball_detector.mlpackage",
   "format": "coreml",
   "input_shape": [
@@ -20,5 +20,7 @@
   "preferred_delegate": "ANE",
   "tracked_class_ids": [
     0
-  ]
+  ],
+  "num_classes": 1,
+  "has_objectness": false
 }

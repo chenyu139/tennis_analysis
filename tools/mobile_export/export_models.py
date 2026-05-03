@@ -304,6 +304,15 @@ def export_detection_model(args: argparse.Namespace, name: str) -> None:
         exported_raw = Path(str(exported))
         exported_path = normalize_exported_model_path(exported_raw, output_dir, output_name)
 
+    # Load model to get class metadata
+    from ultralytics import YOLO as _YOLO
+    _model = _YOLO(args.weights)
+    _num_classes = len(_model.names)
+    _class_names = list(_model.names.values())
+    # YOLOv8/v11 models don't have objectness scores; YOLOv5 models do
+    _has_objectness = "yolo5" in Path(args.weights).stem.lower()
+    del _model
+
     write_metadata(
         output_dir / f"{output_name}.json",
         {
@@ -319,6 +328,9 @@ def export_detection_model(args: argparse.Namespace, name: str) -> None:
             "mobile_target": args.mobile_target,
             "preferred_delegate": preferred_delegate_for_mobile_target(args.mobile_target),
             "tracked_class_ids": [0],
+            "num_classes": _num_classes,
+            "has_objectness": _has_objectness,
+            "class_names": _class_names,
         },
     )
 

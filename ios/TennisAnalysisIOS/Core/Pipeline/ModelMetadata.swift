@@ -13,6 +13,9 @@ struct ModelMetadata: Decodable {
     let normalizeStd: [Float]?
     let trackedClassIds: [Int]?
     let preferredDelegate: String?
+    let numClasses: Int?
+    let hasObjectness: Bool?
+    let classNames: [String]?
 
     enum CodingKeys: String, CodingKey {
         case name
@@ -26,6 +29,9 @@ struct ModelMetadata: Decodable {
         case normalizeStd = "normalize_std"
         case trackedClassIds = "tracked_class_ids"
         case preferredDelegate = "preferred_delegate"
+        case numClasses = "num_classes"
+        case hasObjectness = "has_objectness"
+        case classNames = "class_names"
     }
 }
 
